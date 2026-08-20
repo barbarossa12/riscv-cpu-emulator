@@ -15,3 +15,9 @@ void mem_free(Memory *mem);
 uint8_t mem_read8(Memory *mem, uint32_t addr);
 uint16_t mem_read16(Memory *mem, uint32_t addr);
 uint32_t mem_read32(Memory *mem, uint32_t addr);
+
+/*memory write functions*/
+void mem_write8(Memory *mem, uint32_t addr, uint8_t data);
+void mem_write16(Memory *mem, uint32_t addr, uint16_t data);
+void mem_write32(Memory *mem, uint32_t addr, uint16_t data);
+
