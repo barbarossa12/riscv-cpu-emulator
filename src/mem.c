@@ -14,7 +14,7 @@ void mem_free(Memory *mem) {
 	free(mem->buffer);
 	mem->buffer = NULL;
 	mem->size = 0;
-	LOG_INFO("Memory freed!");
+	LOG_DEBUG("Memory freed!");
 }
 
 /*memory read functions*/
