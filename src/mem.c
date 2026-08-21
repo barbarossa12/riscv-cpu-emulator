@@ -61,7 +61,7 @@ void mem_write16(Memory *mem, uint32_t addr, uint16_t val) {
 	mem->buffer[addr + 1] = (val >> 8) & 0xFF;
 }
 
-void mem_write32(Memory *mem, uint32_t addr, uint16_t val) {
+void mem_write32(Memory *mem, uint32_t addr, uint32_t val) {
 	if(addr + 3 >=  mem->size) {
 		LOG_FATAL("out-of-bound write at address 0x%08x (buffer size %zu)", addr, mem->size);
 	}
