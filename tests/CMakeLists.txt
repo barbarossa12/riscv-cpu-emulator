@@ -10,9 +10,9 @@ FetchContent_MakeAvailable(unity)
 # --- Normal (non-crashing) unit tests -------------------------------------
 # Each of these links against riscv_core + unity, and is expected to exit 0.
 
-# add_executable(test_mem test_mem.c)
-# target_link_libraries(test_mem PRIVATE riscv_core unity)
-# add_test(NAME test_mem COMMAND test_mem)
+add_executable(test_mem test_mem.c)
+target_link_libraries(test_mem PRIVATE riscv_core unity)
+add_test(NAME test_mem COMMAND test_mem)
 
 # add_executable(test_cpu test_cpu.c)
 # target_link_libraries(test_cpu PRIVATE riscv_core unity)
