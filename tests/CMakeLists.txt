@@ -36,10 +36,14 @@ set_tests_properties(test_mem_read8_oob PROPERTIES
     PASS_REGULAR_EXPRESSION "out-of-bound"
 )
 
-# add_executable(test_cpu_reg_oob test_cpu_reg_oob.c)
-# target_link_libraries(test_cpu_reg_oob PRIVATE riscv_core)
-# add_test(NAME test_cpu_reg_oob COMMAND test_cpu_reg_oob)
-# set_tests_properties(test_cpu_reg_oob PROPERTIES
-#     WILL_FAIL TRUE
-#     PASS_REGULAR_EXPRESSION "larger than 32"
-# )
+add_executable(test_cpu_reg_oob test_cpu_reg_oob.c)
+target_link_libraries(test_cpu_reg_oob PRIVATE riscv_core)
+
+add_test(
+    NAME test_cpu_reg_oob
+    COMMAND ${CMAKE_COMMAND} -E env $<TARGET_FILE:test_cpu_reg_oob>
+)
+set_tests_properties(test_cpu_reg_oob PROPERTIES
+    PASS_REGULAR_EXPRESSION "larger than 32"
+)
+
