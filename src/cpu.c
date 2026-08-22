@@ -21,7 +21,7 @@ void cpu_write_reg(CPU *cpu, uint8_t index, uint32_t value) {
 	}
 
 	if(index == 0) {
-		cpu->regs[index] = 0;
+		return;
 	}
 
 	cpu->regs[index] = value;
