@@ -14,9 +14,9 @@ add_executable(test_mem test_mem.c)
 target_link_libraries(test_mem PRIVATE riscv_core unity)
 add_test(NAME test_mem COMMAND test_mem)
 
-# add_executable(test_cpu test_cpu.c)
-# target_link_libraries(test_cpu PRIVATE riscv_core unity)
-# add_test(NAME test_cpu COMMAND test_cpu)
+add_executable(test_cpu test_cpu.c)
+target_link_libraries(test_cpu PRIVATE riscv_core unity)
+add_test(NAME test_cpu COMMAND test_cpu)
 
 # --- Abort-path tests -------------------------------------------------------
 # Each of these is a tiny standalone executable (NOT using Unity) that
