@@ -27,9 +27,9 @@ void test_cpu_x0_read_ignores_underlying_value(void) {
 
 void test_cpu_x0_write_is_discarded(void) {
 	CPU test_cpu = {0};
+	test_cpu.regs[0] = 0xDEADBEEF;
 	cpu_write_reg(&test_cpu, 0, 0x12345);
-	uint32_t val = cpu_read_reg(&test_cpu, 0);
-	TEST_ASSERT_EQUAL_UINT32(0, val);
+	TEST_ASSERT_EQUAL_UINT32(0xDEADBEEF, test_cpu.regs[0]);
 }
 
 void test_cpu_write_to_x0_does_not_affect_other_registers(void) {
