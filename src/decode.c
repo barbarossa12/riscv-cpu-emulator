@@ -13,18 +13,32 @@
 
 int32_t get_immediate(InstrFormat fmt, uint32_t raw) {
     int32_t imm = 0;
+    uint32_t N = 0; // immediate field width
     switch(fmt) {
     case(FMT_R):
         imm   = 0;
         break;
     case(FMT_I):
+	// 12 immediate bits
         imm = (raw >> 20) & 0xFFF;
+	// calculate sign extension
+	N = 12;
+	if(imm & 1u << (N-1)) {
+		imm |= ~((1u << N) - 1);
+	}
         break;
     case(FMT_S):
-        imm = (raw >> 25) & 0x7F | (raw >> 7) & 0x1F;
+	// 12 immediate bits
+        imm = (((raw >> 25) & 0x7F) << 0x5) | (raw >> 7) & 0x1F;
+	N = 12;
+	if(imm & 1u << (N-1)) {
+		imm |= ~((1u << N) - 1);
+	}
         break;
     case(FMT_B):
-        imm = (raw >> 31) & 0x01 | (raw > 7) & 0x01 | (raw >> 25) & 0x3F | (raw >> 8) & 0xF;
+	N = 13;
+        imm = (raw >> 31) & 0x01 | (raw >> 7) & 0x01 | (raw >> 25) & 0x3F | (raw >> 8) & 0xF;
+        imm = (((raw >> 31) & 0x01) << 12) | (((raw >> 7) & 0x01) << 11) | (((raw >> 25) & 0x3F);
         break;
     case(FMT_U):
 	    imm = (raw >> 12) & 0x1FFFFF;
