@@ -2,6 +2,7 @@
 #include "cpu.h"
 #include "decode.h"
 #include "mem.h"
+#include "execute.h"
 
 int main(){
 	CPU cpu = {0};
@@ -16,9 +17,8 @@ int main(){
 		uint32_t raw = mem_read32(&mem, cpu.pc);
 		DecodedInstruction instr = decode_instruction(raw);
 
-		// execute will go here.
-		printf("%d", instr.raw);
-		cpu.pc += 4; // increase the program counter by 4 bytes.
+		// execute will go here
+		execute(&cpu, &mem, &instr);
 	}
 	mem_free(&mem);
 	return 0;
