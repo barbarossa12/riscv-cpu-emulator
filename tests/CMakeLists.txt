@@ -22,6 +22,10 @@ add_executable(test_decode test_decode.c)
 target_link_libraries(test_decode PRIVATE riscv_core unity)
 add_test(NAME test_decode COMMAND test_decode)
 
+add_executable(test_execute test_execute.c)
+target_link_libraries(test_execute PRIVATE riscv_core unity)
+add_test(NAME test_execute COMMAND test_execute)
+
 # --- Abort-path tests -------------------------------------------------------
 # Each of these is a tiny standalone executable (NOT using Unity) that
 # deliberately triggers one specific LOG_FATAL/abort() path. CTest normally
