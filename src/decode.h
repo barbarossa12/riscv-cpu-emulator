@@ -28,3 +28,4 @@ typedef struct {
 } DecodedInstruction;
 
 DecodedInstruction decode_instruction(uint32_t raw);
+int32_t get_immediate(InstrFormat fmt, uint32_t raw);
