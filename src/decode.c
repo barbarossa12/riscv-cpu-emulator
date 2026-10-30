@@ -29,7 +29,7 @@ int32_t get_immediate(InstrFormat fmt, uint32_t raw) {
         break;
     case(FMT_S):
 	// 12 immediate bits
-        imm = (((raw >> 25) & 0x7F) << 0x5) | (raw >> 7) & 0x1F;
+        imm = (((raw >> 25) & 0x7F) << 0x5) | ((raw >> 7) & 0x1F);
 	    N = 12;
 	    if(imm & 1u << (N-1)) {
 	    	imm |= ~((1u << N) - 1);
