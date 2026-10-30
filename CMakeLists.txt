@@ -22,6 +22,7 @@ add_library(riscv_core
     src/mem.c
     src/log.c
     src/decode.c
+    src/execute.c
 )
 target_include_directories(riscv_core PUBLIC src)
 
