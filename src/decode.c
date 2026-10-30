@@ -21,30 +21,44 @@ int32_t get_immediate(InstrFormat fmt, uint32_t raw) {
     case(FMT_I):
 	// 12 immediate bits
         imm = (raw >> 20) & 0xFFF;
-	// calculate sign extension
-	N = 12;
-	if(imm & 1u << (N-1)) {
-		imm |= ~((1u << N) - 1);
-	}
+	    // calculate sign extension
+	    N = 12;
+	    if(imm & 1u << (N-1)) {
+	    	imm |= ~((1u << N) - 1);
+	    }
         break;
     case(FMT_S):
 	// 12 immediate bits
         imm = (((raw >> 25) & 0x7F) << 0x5) | (raw >> 7) & 0x1F;
-	N = 12;
-	if(imm & 1u << (N-1)) {
-		imm |= ~((1u << N) - 1);
-	}
+	    N = 12;
+	    if(imm & 1u << (N-1)) {
+	    	imm |= ~((1u << N) - 1);
+	    }
         break;
     case(FMT_B):
-	N = 13;
-        imm = (raw >> 31) & 0x01 | (raw >> 7) & 0x01 | (raw >> 25) & 0x3F | (raw >> 8) & 0xF;
-        imm = (((raw >> 31) & 0x01) << 12) | (((raw >> 7) & 0x01) << 11) | (((raw >> 25) & 0x3F);
+	    N = 13;
+        imm  = ((raw >> 31) & 0x01) << 12;
+        imm |= ((raw >> 7) & 0x01) << 11;
+        imm |= ((raw >> 25) & 0x3F) << 5;
+        imm |= ((raw >> 8) & 0xF) << 1;
+
+	    if(imm & 1u << (N-1)) {
+	    	imm |= ~((1u << N) - 1);
+        }
         break;
     case(FMT_U):
-	    imm = (raw >> 12) & 0x1FFFFF;
+	    imm = raw & 0xFFFFF000;
         break;
     case(FMT_J):
-	    imm = (raw >> 31) & 0x1 | (raw >> 19) & 0xFF | (raw >> 20) & 0x01 | (raw >> 21) & 0x3FF;
+        N = 21;
+        imm = ((raw >> 31) & 0x01) << 20;
+        imm |= ((raw >> 12) & 0xFF) << 12;
+        imm |= ((raw >> 20) & 0x01) << 11;
+        imm |= ((raw >> 21) & 0x3FF) << 1;
+
+        if (imm & 1u << (N-1)) {
+            imm |= ~((1u << N) - 1);
+        }
         break;
     default:
         imm = 0;
@@ -72,64 +86,72 @@ DecodedInstruction decode_instruction(uint32_t raw) {
             // U type
             // LUI
             ret.format = FMT_U;
-	    ret.imm = (raw >> 12) & 0x1FFFFF;
+	        ret.imm = get_immediate(ret.format, raw);
             break;
     case 0x17:
             // U type
             // AUIPC
             ret.format = FMT_U;
-	    ret.imm = (raw >> 12) & 0x1FFFFF;
+	        ret.imm = get_immediate(ret.format, raw);
         break;
     case 0x6F:
             // J type
             // JAL
             ret.format = FMT_J;
-	    ret.imm = (raw >> 31) & 0x1 | (raw >> 19) & 0xFF | (raw >> 20) & 0x01 | (raw >> 21) & 0x3FF;
+	        ret.imm = get_immediate(ret.format, raw);
         break;
     case 0x67:
             // I type
             // JALR
             ret.format = FMT_I;
-	    ret.imm = (raw >> 20) & 0x3FF;
+	        ret.imm = get_immediate(ret.format, raw);
         break;
     case 0x63:
             // B type
             // BEQ, BNE, BLT. BGE, BLTU, BGEU
             ret.format = FMT_B;
+	        ret.imm = get_immediate(ret.format, raw);
         break;
     case 0x03:
             // I type
             // LB, LH, LW, LBU, LHU
             ret.format = FMT_I;
+	        ret.imm = get_immediate(ret.format, raw);
         break;
     case 0x23:
             // S type
             // SB, SH, SW
             ret.format = FMT_S;
+	        ret.imm = get_immediate(ret.format, raw);
         break;
     case 0x13:
             //  I type
             // ADDI, SLTI, SLTIU, XORI, ORI, ANDI, SLLI, SRLI, SRAI
             ret.format = FMT_I;
+            ret.imm = get_immediate(ret.format, raw);
         break;
     case 0x33:
             // R type
             // ADD, SUB, SLL, SLT, SLTU, XOR, SRL, SRA, OR, AND
             ret.format = FMT_R;
+	        ret.imm = get_immediate(ret.format, raw);
         break;
     case 0x0F:
             // FENCE
             // FENCE
             ret.format = FMT_UNKNOWN;
+	        ret.imm = get_immediate(ret.format, raw);
         break;
     case 0x73:
             // I type
             // ECALL, EBREAK and CSR instructions.
             ret.format = FMT_I;
+	        ret.imm = get_immediate(ret.format, raw);
         break;
     default:
             // unknown opcode
             ret.format = FMT_I;
+            ret.imm = get_immediate(ret.format, raw);
         break;
 
     }
