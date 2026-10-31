@@ -132,6 +132,39 @@ void execute(CPU *cpu, Memory *mem, DecodedInstruction *instr) {
                     cpu->pc = pc + 4;
                     break;
                 }
+                case 0x5: // SRL or SRA
+                {
+                    uint32_t rs1_val = cpu_read_reg(cpu, instr->rs1);
+                    uint32_t rs2_val = cpu_read_reg(cpu, instr->rs2);
+                    uint32_t shamt = rs2_val & 0x1F;
+                    if(instr->funct7 == 0x00) {  // SRL
+                        cpu_write_reg(cpu, instr->rd, rs1_val >> shamt);
+                    } else {
+                        uint32_t shifted = rs1_val >> shamt;
+                        if(rs1_val & 0x80000000) {
+                            shifted |= ~(0xFFFFFFFFu >> shamt);
+                        }
+                        cpu_write_reg(cpu, instr->rd, shifted);
+                    }
+                    cpu->pc = pc + 4;
+                    break;
+                }
+                case 0x6:
+                {
+                    uint32_t rs1_val = cpu_read_reg(cpu, instr->rs1);
+                    uint32_t rs2_val = cpu_read_reg(cpu, instr->rs2);
+                    cpu_write_reg(cpu, instr->rd, rs1_val | rs2_val);
+                    cpu->pc = pc + 4;
+                    break;
+                }
+                case 0x7:
+                {
+                    uint32_t rs1_val = cpu_read_reg(cpu, instr->rs1);
+                    uint32_t rs2_val = cpu_read_reg(cpu, instr->rs2);
+                    cpu_write_reg(cpu, instr->rd, rs1_val & rs2_val);
+                    cpu->pc = pc + 4;
+                    break;
+                }
             default:
                     LOG_FATAL("unimplemented funct3 for opcode 0x33: funct3=0x%x", instr->funct3);
             break;
