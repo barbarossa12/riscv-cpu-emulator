@@ -410,6 +410,78 @@ void test_xor(void) {
     mem_free(&mem);
 }
 
+void test_srl(void) {
+    CPU cpu = {0};
+    Memory mem;
+    mem_init(&mem, 16);
+
+    cpu_write_reg(&cpu, 1, 0x80000000);
+    cpu_write_reg(&cpu, 2, 4);
+    mem_write32(&mem, 0, 0x0020D1B3); // SRL x3, x1, x2
+
+    uint32_t raw = mem_read32(&mem, cpu.pc);
+    DecodedInstruction instr = decode_instruction(raw);
+    execute(&cpu, &mem, &instr);
+
+    TEST_ASSERT_EQUAL_UINT32(0x08000000, cpu_read_reg(&cpu,3));
+    TEST_ASSERT_EQUAL_UINT32(4, cpu.pc);
+    mem_free(&mem);
+}
+
+void test_sra(void) {
+    CPU cpu = {0};
+    Memory mem;
+    mem_init(&mem, 16);
+
+    cpu_write_reg(&cpu, 1, 0x80000000);
+    cpu_write_reg(&cpu, 2, 4);
+    mem_write32(&mem, 0, 0x4020D1B3); // SRA x3, x1, x2
+
+    uint32_t raw = mem_read32(&mem, cpu.pc);
+    DecodedInstruction instr = decode_instruction(raw);
+    execute(&cpu, &mem, &instr);
+
+    TEST_ASSERT_EQUAL_UINT32(0xF8000000, cpu_read_reg(&cpu,3));
+    TEST_ASSERT_EQUAL_UINT32(4, cpu.pc);
+    mem_free(&mem);
+}
+
+void test_or(void) {
+    CPU cpu = {0};
+    Memory mem;
+    mem_init(&mem, 16);
+
+    cpu_write_reg(&cpu, 1, 0xFF0);
+    cpu_write_reg(&cpu, 2, 0x0FF);
+    mem_write32(&mem, 0, 0x0020E1B3); // OR x3, x1, x2
+
+    uint32_t raw = mem_read32(&mem, cpu.pc);
+    DecodedInstruction instr = decode_instruction(raw);
+    execute(&cpu, &mem, &instr);
+
+    TEST_ASSERT_EQUAL_UINT32(0xFFF, cpu_read_reg(&cpu,3));
+    TEST_ASSERT_EQUAL_UINT32(4, cpu.pc);
+    mem_free(&mem);
+}
+
+void test_and(void) {
+    CPU cpu = {0};
+    Memory mem;
+    mem_init(&mem, 16);
+
+    cpu_write_reg(&cpu, 1, 0xFF0);
+    cpu_write_reg(&cpu, 2, 0x0FF);
+    mem_write32(&mem, 0, 0x0020F1B3); // AND x3, x1, x2
+
+    uint32_t raw = mem_read32(&mem, cpu.pc);
+    DecodedInstruction instr = decode_instruction(raw);
+    execute(&cpu, &mem, &instr);
+
+    TEST_ASSERT_EQUAL_UINT32(0x0F0, cpu_read_reg(&cpu,3));
+    TEST_ASSERT_EQUAL_UINT32(4, cpu.pc);
+    mem_free(&mem);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_addi);
@@ -435,5 +507,9 @@ int main(void) {
     RUN_TEST(test_sltu_false);
     RUN_TEST(test_sltu_signed_edge);
     RUN_TEST(test_xor);
+    RUN_TEST(test_srl);
+    RUN_TEST(test_sra);
+    RUN_TEST(test_or);
+    RUN_TEST(test_and);
 	return UNITY_END();
 }
