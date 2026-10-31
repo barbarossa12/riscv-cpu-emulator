@@ -33,16 +33,28 @@ void execute(CPU *cpu, Memory *mem, DecodedInstruction *instr) {
                     }
 
                 case 0x04: // XORI
-                    LOG_FATAL("XORI not implemented yet");
-                break;
+                    {
+                        uint32_t rs1_val = cpu_read_reg(cpu,instr->rs1);
+                        cpu_write_reg(cpu, instr->rd, rs1_val ^ (uint32_t)instr->imm);
+                        cpu->pc = pc + 4;
+                        break;
+                    }
 
                 case 0x06: // ORI
-                    LOG_FATAL("ORI not implemented yet");
-                break;
+                    {
+                        uint32_t rs1_val = cpu_read_reg(cpu, instr->rs1);
+                        cpu_write_reg(cpu, instr->rd, rs1_val | (uint32_t)instr->imm);
+                        cpu->pc = pc + 4;
+                        break;
+                    }
 
                 case 0x07: // ANDI
-                    LOG_FATAL("ANDI not implemented yet");
-                break;
+                    {
+                        uint32_t rs1_val = cpu_read_reg(cpu, instr->rs1);
+                        cpu_write_reg(cpu, instr->rd, rs1_val & (uint32_t)instr->imm);
+                        cpu-> pc = pc + 4;
+                        break;
+                    }
 
                 case 0x1: // SLLI
                     LOG_FATAL("SLLI not implemented yet");
