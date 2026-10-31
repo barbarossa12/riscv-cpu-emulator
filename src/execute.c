@@ -205,6 +205,24 @@ void execute(CPU *cpu, Memory *mem, DecodedInstruction *instr) {
                         cpu->pc = pc + 4;
                         break;
                     }
+                case 0x1: // LH
+                    {
+                        uint32_t rs1_val = cpu_read_reg(cpu, instr->rs1);
+                        uint32_t addr = rs1_val + (uint32_t)instr->imm;
+                        int16_t half = (int16_t)mem_read16(mem, addr);
+                        cpu_write_reg(cpu, instr->rd, (uint32_t)(int32_t)half); // sign extended
+                        cpu->pc = pc+4;
+                        break;
+                    }
+                case 0x5: // LHU
+                    {
+                        uint32_t rs1_val = cpu_read_reg(cpu, instr->rs1);
+                        uint32_t addr = rs1_val + (uint32_t)instr->imm;
+                        uint16_t half = mem_read16(mem, addr);
+                        cpu_write_reg(cpu, instr->rd, (uint32_t)half); //zero-extended
+                        cpu->pc = pc + 4;
+                        break;
+                    }
                 default:
                     LOG_FATAL("unimplemented funct3 for opcode 0x03: funct3=0x%x", instr->funct3);
                 break;
