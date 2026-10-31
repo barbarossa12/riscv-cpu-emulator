@@ -57,12 +57,28 @@ void execute(CPU *cpu, Memory *mem, DecodedInstruction *instr) {
                     }
 
                 case 0x1: // SLLI
-                    LOG_FATAL("SLLI not implemented yet");
-                break;
+                    {
+                        uint32_t rs1_val = cpu_read_reg(cpu, instr->rs1);
+                        cpu_write_reg(cpu, instr->rd, rs1_val << instr->rs2);
+                        cpu->pc = pc + 4;
+                        break;
+                    }
 
                 case 0x05: // SRLI or SRAI
-                    LOG_FATAL("SRLI or SRAI not implemented yet");
-                break;
+                    {
+                        uint32_t rs1_val = cpu_read_reg(cpu, instr->rs1); 
+                        if(instr->funct7 == 0x00) { // SRLI case
+                            cpu_write_reg(cpu, instr->rd, rs1_val >> instr->rs2);
+                        } else { // SRAI (funct7 == 0x20)
+                            uint32_t shifted = rs1_val >> instr->rs2;       // unsigned shift: standard-guaranteed zero-fill
+                            if (rs1_val & 0x80000000) {                     // original sign bit was set
+                                shifted |= ~(0xFFFFFFFFu >> instr->rs2);    // manually sign-fill the vacated top bits
+                            }
+                            cpu_write_reg(cpu, instr->rd, shifted);
+                        }
+                        cpu->pc = pc + 4;
+                        break;
+                    }
                 
                 default:
                         LOG_FATAL("unimplemented funct3 for opcode 0x13: funct3=0x%x", instr->funct3);
