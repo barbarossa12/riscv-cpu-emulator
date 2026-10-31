@@ -5,7 +5,7 @@ void execute(CPU *cpu, Memory *mem, DecodedInstruction *instr) {
     uint32_t pc = cpu->pc;
     (void)mem;
     switch(instr->opcode) {
-        case 0x13:
+        case 0x13: // I type ALU group
 
             switch(instr->funct3) {
                 case 0x000: //ADDI
@@ -66,7 +66,7 @@ void execute(CPU *cpu, Memory *mem, DecodedInstruction *instr) {
 
                 case 0x05: // SRLI or SRAI
                     {
-                        uint32_t rs1_val = cpu_read_reg(cpu, instr->rs1); 
+                        uint32_t rs1_val = cpu_read_reg(cpu, instr->rs1);
                         if(instr->funct7 == 0x00) { // SRLI case
                             cpu_write_reg(cpu, instr->rd, rs1_val >> instr->rs2);
                         } else { // SRAI (funct7 == 0x20)
@@ -79,7 +79,7 @@ void execute(CPU *cpu, Memory *mem, DecodedInstruction *instr) {
                         cpu->pc = pc + 4;
                         break;
                     }
-                
+
                 default:
                         LOG_FATAL("unimplemented funct3 for opcode 0x13: funct3=0x%x", instr->funct3);
                 break;
