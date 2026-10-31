@@ -392,6 +392,24 @@ void test_sltu_signed_edge(void) {
     mem_free(&mem);
 }
 
+void test_xor(void) {
+    CPU cpu = {0};
+    Memory mem;
+    mem_init(&mem, 16);
+
+    cpu_write_reg(&cpu, 1, 0xFF0);
+    cpu_write_reg(&cpu, 2, 0x0FF);
+    mem_write32(&mem, 0, 0x0020C1B3); // XOR x3, x1, x2
+
+    uint32_t raw = mem_read32(&mem, cpu.pc);
+    DecodedInstruction instr = decode_instruction(raw);
+    execute(&cpu, &mem, &instr);
+
+    TEST_ASSERT_EQUAL_UINT32(0xF0F, cpu_read_reg(&cpu,3));
+    TEST_ASSERT_EQUAL_UINT32(4, cpu.pc);
+    mem_free(&mem);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_addi);
@@ -416,5 +434,6 @@ int main(void) {
     RUN_TEST(test_sltu_true);
     RUN_TEST(test_sltu_false);
     RUN_TEST(test_sltu_signed_edge);
+    RUN_TEST(test_xor);
 	return UNITY_END();
 }
