@@ -15,6 +15,7 @@ void execute(CPU *cpu, Memory *mem, DecodedInstruction *instr) {
                         cpu->pc = pc + 4;
                         break;
                     }
+
                 case 0x02: // SLTI
                     {
                         uint32_t rs1_val = cpu_read_reg(cpu, instr->rs1);
@@ -24,8 +25,12 @@ void execute(CPU *cpu, Memory *mem, DecodedInstruction *instr) {
                     }
 
                 case 0x03: // SLTIU
-                    LOG_FATAL("SLTIU not implemented yet");
-                break;
+                    {
+                        uint32_t rs1_val = cpu_read_reg(cpu, instr->rs1);
+                        cpu_write_reg(cpu, instr->rd, (rs1_val < (uint32_t)instr->imm) ? 1 : 0);
+                        cpu->pc = pc + 4;
+                        break;
+                    }
 
                 case 0x04: // XORI
                     LOG_FATAL("XORI not implemented yet");
