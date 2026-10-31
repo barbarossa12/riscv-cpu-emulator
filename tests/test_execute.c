@@ -29,7 +29,7 @@ void test_slti_true(void) {
     cpu_write_reg(&cpu, 1, 3);              // set up x1 directly, bypassing decode/execute
     mem_write32(&mem, 0, 0x0050A113);       // SLTI x2, x1, 5
 
-    int32_t raw = mem_read32(&mem, cpu.pc);
+    uint32_t raw = mem_read32(&mem, cpu.pc);
     DecodedInstruction instr = decode_instruction(raw);
     execute(&cpu, &mem, &instr);
 
@@ -46,7 +46,7 @@ void test_slti_false(void) {
     cpu_write_reg(&cpu, 1, 5); // set up x1 directly bypassing decode / execute
     mem_write32(&mem, 0, 0x0030A113); // SLTI x2, x1, 3
 
-    int32_t raw = mem_read32(&mem, cpu.pc);
+    uint32_t raw = mem_read32(&mem, cpu.pc);
     DecodedInstruction instr = decode_instruction(raw);
     execute(&cpu, &mem, &instr);
 
@@ -63,7 +63,7 @@ void test_slti_signed_edge(void) {
     cpu_write_reg(&cpu, 1, -1); // set up x1 directly bypassing decode / execute
     mem_write32(&mem, 0, 0x0000A113); // SLTI x2, x1, 0
 
-    int32_t raw = mem_read32(&mem, cpu.pc);
+    uint32_t raw = mem_read32(&mem, cpu.pc);
     DecodedInstruction instr = decode_instruction(raw);
     execute(&cpu, &mem, &instr);
 
@@ -80,7 +80,7 @@ void test_sltiu_true(void) {
     cpu_write_reg(&cpu, 1, 3); // set up x1 directly bypassing decode / execute
     mem_write32(&mem, 0, 0x0050B113); // SLTIU x2, x1, 5
 
-    int32_t raw = mem_read32(&mem, cpu.pc);
+    uint32_t raw = mem_read32(&mem, cpu.pc);
     DecodedInstruction instr = decode_instruction(raw);
     execute(&cpu, &mem, &instr);
 
@@ -97,7 +97,7 @@ void test_sltiu_false(void) {
     cpu_write_reg(&cpu, 1, 5); // set up x1 directly bypassing decode / execute
     mem_write32(&mem, 0, 0x0030B113); // SLTIU x2, x1, 3
 
-    int32_t raw = mem_read32(&mem, cpu.pc);
+    uint32_t raw = mem_read32(&mem, cpu.pc);
     DecodedInstruction instr = decode_instruction(raw);
     execute(&cpu, &mem, &instr);
 
@@ -115,7 +115,7 @@ void test_sltiu_signed_edge(void) {
     cpu_write_reg(&cpu, 1, -1); // set up x1 directly bypassing decode / execute
     mem_write32(&mem, 0, 0x0000B113); // SLTIU x2, x1, 0
 
-    int32_t raw = mem_read32(&mem, cpu.pc);
+    uint32_t raw = mem_read32(&mem, cpu.pc);
     DecodedInstruction instr = decode_instruction(raw);
     execute(&cpu, &mem, &instr);
 
@@ -126,6 +126,56 @@ void test_sltiu_signed_edge(void) {
 
 
 
+void test_xori(void) {
+    CPU cpu = {0};
+    Memory mem;
+    mem_init(&mem, 16);
+
+    cpu_write_reg(&cpu, 1, 0xFF0);
+    mem_write32(&mem, 0, 0x0FF0C113); // XORI x2, x1, 0x0FF
+
+    uint32_t raw = mem_read32(&mem, cpu.pc);
+    DecodedInstruction instr = decode_instruction(raw);
+    execute(&cpu, &mem, &instr);
+
+    TEST_ASSERT_EQUAL_UINT32(0xF0F, cpu_read_reg(&cpu,2));
+    TEST_ASSERT_EQUAL_UINT32(4, cpu.pc);
+    mem_free(&mem);
+}
+
+void test_ori(void) {
+    CPU cpu = {0};
+    Memory mem;
+    mem_init(&mem, 16);
+
+    cpu_write_reg(&cpu, 1, 0xFF0);
+    mem_write32(&mem, 0, 0x0FF0E113); // ORI x2, x1, 0x0FF
+
+    uint32_t raw = mem_read32(&mem, cpu.pc);
+    DecodedInstruction instr = decode_instruction(raw);
+    execute(&cpu, &mem, &instr);
+
+    TEST_ASSERT_EQUAL_UINT32(0xFFF, cpu_read_reg(&cpu,2));
+    TEST_ASSERT_EQUAL_UINT32(4, cpu.pc);
+    mem_free(&mem);
+}
+
+void test_andi(void) {
+    CPU cpu = {0};
+    Memory mem;
+    mem_init(&mem, 16);
+
+    cpu_write_reg(&cpu, 1, 0xFF0);
+    mem_write32(&mem, 0, 0x0FF0F113); // ANDI x2, x1, 0x0FF
+
+    uint32_t raw = mem_read32(&mem, cpu.pc);
+    DecodedInstruction instr = decode_instruction(raw);
+    execute(&cpu, &mem, &instr);
+
+    TEST_ASSERT_EQUAL_UINT32(0x0F0, cpu_read_reg(&cpu,2));
+    TEST_ASSERT_EQUAL_UINT32(4, cpu.pc);
+    mem_free(&mem);
+}
 
 int main(void) {
     UNITY_BEGIN();
@@ -133,11 +183,17 @@ int main(void) {
     RUN_TEST(test_slti_true);
     RUN_TEST(test_slti_false);
     RUN_TEST(test_slti_signed_edge);
-    RUN_TEST(test_sltiu_true); 
-    RUN_TEST(test_sltiu_false); 
-    RUN_TEST(test_sltiu_signed_edge); 
+    RUN_TEST(test_sltiu_true);
+    RUN_TEST(test_sltiu_false);
+    RUN_TEST(test_sltiu_signed_edge);
+    RUN_TEST(test_xori);
+    RUN_TEST(test_ori);
+    RUN_TEST(test_andi);
 	return UNITY_END();
 }
+
+
+
 
 
 
