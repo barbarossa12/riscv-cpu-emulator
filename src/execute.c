@@ -171,6 +171,20 @@ void execute(CPU *cpu, Memory *mem, DecodedInstruction *instr) {
             }
         break;
 
+        case 0x37: // LUI
+            {
+                cpu_write_reg(cpu, instr->rd, (uint32_t)instr->imm);
+                cpu->pc = pc + 4;
+                break;
+            }
+
+        case 0x17: // AUIPC
+        {
+            cpu_write_reg(cpu, instr->rd, pc + (uint32_t)instr->imm);
+            cpu->pc = pc + 4;
+            break;
+        }
+
         default:
             LOG_FATAL("unimplemented instruction: opcode=0x%x funct3=0x%x", instr->opcode, instr->funct3);
 
