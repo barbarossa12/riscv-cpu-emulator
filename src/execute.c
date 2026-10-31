@@ -5,7 +5,7 @@ void execute(CPU *cpu, Memory *mem, DecodedInstruction *instr) {
     uint32_t pc = cpu->pc;
     (void)mem;
     switch(instr->opcode) {
-        case 0x13: // ADDI
+        case 0x13:
 
             switch(instr->funct3) {
                 case 0x000: //ADDI
