@@ -482,6 +482,38 @@ void test_and(void) {
     mem_free(&mem);
 }
 
+void test_lui(void) {
+    CPU cpu = {0};
+    Memory mem;
+    mem_init(&mem, 16);
+
+    mem_write32(&mem, 0, 0x123450B7); // LUI x1, 0x12345
+
+    uint32_t raw = mem_read32(&mem, cpu.pc);
+    DecodedInstruction instr = decode_instruction(raw);
+    execute(&cpu, &mem, &instr);
+
+    TEST_ASSERT_EQUAL_UINT32(0x12345000, cpu_read_reg(&cpu,1));
+    TEST_ASSERT_EQUAL_UINT32(4, cpu.pc);
+    mem_free(&mem);
+}
+
+void test_auipc(void) {
+    CPU cpu = {0};
+    Memory mem;
+    mem_init(&mem, 16);
+
+    mem_write32(&mem, 0, 0x00002117); // AUIPC x2, 0x2
+
+    uint32_t raw = mem_read32(&mem, cpu.pc);
+    DecodedInstruction instr = decode_instruction(raw);
+    execute(&cpu, &mem, &instr);
+
+    TEST_ASSERT_EQUAL_UINT32(0x00002000, cpu_read_reg(&cpu,2));
+    TEST_ASSERT_EQUAL_UINT32(4, cpu.pc);
+    mem_free(&mem);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_addi);
@@ -511,5 +543,7 @@ int main(void) {
     RUN_TEST(test_sra);
     RUN_TEST(test_or);
     RUN_TEST(test_and);
+    RUN_TEST(test_lui);
+    RUN_TEST(test_auipc);
 	return UNITY_END();
 }
