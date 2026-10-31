@@ -514,6 +514,42 @@ void test_auipc(void) {
     mem_free(&mem);
 }
 
+void test_lb(void) {
+    CPU cpu = {0};
+    Memory mem;
+    mem_init(&mem, 16);
+
+    cpu_write_reg(&cpu, 1, 8); // x1 = base address 8
+    mem_write8(&mem, 8, 0xFF);
+    mem_write32(&mem, 0, 0x00008103); // LB x2, 0(x1)
+
+    uint32_t raw = mem_read32(&mem, cpu.pc);
+    DecodedInstruction instr = decode_instruction(raw);
+    execute(&cpu, &mem, &instr);
+
+    TEST_ASSERT_EQUAL_UINT32(0xFFFFFFFF, cpu_read_reg(&cpu,2));
+    TEST_ASSERT_EQUAL_UINT32(4, cpu.pc);
+    mem_free(&mem);
+}
+
+void test_lbu(void) {
+    CPU cpu = {0};
+    Memory mem;
+    mem_init(&mem, 16);
+
+    cpu_write_reg(&cpu, 1, 8); // x1 = base address 8
+    mem_write8(&mem, 8, 0xFF);
+    mem_write32(&mem, 0, 0x0000C103); // LBU x2, 0(x1)
+
+    uint32_t raw = mem_read32(&mem, cpu.pc);
+    DecodedInstruction instr = decode_instruction(raw);
+    execute(&cpu, &mem, &instr);
+
+    TEST_ASSERT_EQUAL_UINT32(0x000000FF, cpu_read_reg(&cpu,2));
+    TEST_ASSERT_EQUAL_UINT32(4, cpu.pc);
+    mem_free(&mem);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_addi);
@@ -545,5 +581,7 @@ int main(void) {
     RUN_TEST(test_and);
     RUN_TEST(test_lui);
     RUN_TEST(test_auipc);
+    RUN_TEST(test_lb);
+    RUN_TEST(test_lbu);
 	return UNITY_END();
 }
