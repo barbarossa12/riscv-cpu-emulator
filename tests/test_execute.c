@@ -177,6 +177,57 @@ void test_andi(void) {
     mem_free(&mem);
 }
 
+void test_slli(void) {
+    CPU cpu = {0};
+    Memory mem;
+    mem_init(&mem, 16);
+
+    cpu_write_reg(&cpu, 1, 0x0F);
+    mem_write32(&mem, 0, 0x00409113); // SLLI x2, x1, 4
+
+    uint32_t raw = mem_read32(&mem, cpu.pc);
+    DecodedInstruction instr = decode_instruction(raw);
+    execute(&cpu, &mem, &instr);
+
+    TEST_ASSERT_EQUAL_UINT32(0xF0, cpu_read_reg(&cpu,2));
+    TEST_ASSERT_EQUAL_UINT32(4, cpu.pc);
+    mem_free(&mem);
+}
+
+void test_srli(void) {
+    CPU cpu = {0};
+    Memory mem;
+    mem_init(&mem, 16);
+
+    cpu_write_reg(&cpu, 1, 0x80000000);
+    mem_write32(&mem, 0, 0x0040D113); // SRLI x2, x1, 4
+
+    uint32_t raw = mem_read32(&mem, cpu.pc);
+    DecodedInstruction instr = decode_instruction(raw);
+    execute(&cpu, &mem, &instr);
+
+    TEST_ASSERT_EQUAL_UINT32(0x08000000, cpu_read_reg(&cpu,2));
+    TEST_ASSERT_EQUAL_UINT32(4, cpu.pc);
+    mem_free(&mem);
+}
+
+void test_srai(void) {
+    CPU cpu = {0};
+    Memory mem;
+    mem_init(&mem, 16);
+
+    cpu_write_reg(&cpu, 1, 0x80000000);
+    mem_write32(&mem, 0, 0x4040D113); // SRAI x2, x1, 4
+
+    uint32_t raw = mem_read32(&mem, cpu.pc);
+    DecodedInstruction instr = decode_instruction(raw);
+    execute(&cpu, &mem, &instr);
+
+    TEST_ASSERT_EQUAL_UINT32(0xF8000000, cpu_read_reg(&cpu,2));
+    TEST_ASSERT_EQUAL_UINT32(4, cpu.pc);
+    mem_free(&mem);
+}
+
 int main(void) {
     UNITY_BEGIN();
 	RUN_TEST(test_addi);
@@ -189,13 +240,8 @@ int main(void) {
     RUN_TEST(test_xori);
     RUN_TEST(test_ori);
     RUN_TEST(test_andi);
+    RUN_TEST(test_slli);
+    RUN_TEST(test_srli);
+    RUN_TEST(test_srai);
 	return UNITY_END();
 }
-
-
-
-
-
-
-
-
