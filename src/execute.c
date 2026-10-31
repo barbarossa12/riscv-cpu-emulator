@@ -124,6 +124,14 @@ void execute(CPU *cpu, Memory *mem, DecodedInstruction *instr) {
                     cpu->pc = pc + 4;
                     break;
                 }
+                case 0x4: // XOR
+                {
+                    uint32_t rs1_val = cpu_read_reg(cpu, instr->rs1);
+                    uint32_t rs2_val = cpu_read_reg(cpu, instr->rs2);
+                    cpu_write_reg(cpu, instr->rd, rs1_val ^ rs2_val);
+                    cpu->pc = pc + 4;
+                    break;
+                }
             default:
                     LOG_FATAL("unimplemented funct3 for opcode 0x33: funct3=0x%x", instr->funct3);
             break;
