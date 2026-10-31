@@ -85,6 +85,51 @@ void execute(CPU *cpu, Memory *mem, DecodedInstruction *instr) {
                 break;
             }
         break;
+
+        case 0x33:
+            switch(instr->funct3) {
+                case 0x0: // ADD or SUB
+                {   
+                    uint32_t rs1_val = cpu_read_reg(cpu, instr->rs1);
+                    uint32_t rs2_val = cpu_read_reg(cpu, instr->rs2);
+                    if(instr->funct7 == 0x00) {
+                        cpu_write_reg(cpu, instr->rd, rs1_val + rs2_val); // ADD
+                    } else {
+                        cpu_write_reg(cpu, instr->rd, rs1_val - rs2_val); // SUB
+                    }
+                    cpu->pc = pc + 4;
+                    break;
+                }
+                case 0x1: // SLL
+                {
+                    uint32_t rs1_val = cpu_read_reg(cpu, instr->rs1);
+                    uint32_t rs2_val = cpu_read_reg(cpu, instr->rs2);
+                    cpu_write_reg(cpu, instr->rd, rs1_val << (rs2_val & 0x1F));
+                    cpu->pc = pc + 4;
+                    break;
+                }
+                case 0x2: // SLT
+                {
+                    uint32_t rs1_val = cpu_read_reg(cpu, instr->rs1);
+                    uint32_t rs2_val = cpu_read_reg(cpu, instr->rs2);
+                    cpu_write_reg(cpu, instr->rd, ((int32_t)rs1_val < (int32_t)rs2_val) ? 1 : 0);
+                    cpu->pc = pc + 4;
+                    break;
+                }
+                case 0x3: // SLTU
+                {
+                    uint32_t rs1_val = cpu_read_reg(cpu, instr->rs1);
+                    uint32_t rs2_val = cpu_read_reg(cpu, instr->rs2);
+                    cpu_write_reg(cpu, instr->rd, (rs1_val < rs2_val) ? 1 : 0);
+                    cpu->pc = pc + 4;
+                    break;
+                }
+            default:
+                    LOG_FATAL("unimplemented funct3 for opcode 0x33: funct3=0x%x", instr->funct3);
+            break;
+            }
+        break;
+
         default:
             LOG_FATAL("unimplemented instruction: opcode=0x%x funct3=0x%x", instr->opcode, instr->funct3);
 
