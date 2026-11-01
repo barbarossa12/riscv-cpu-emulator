@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
+#include <stdbool.h>
 
 typedef struct Memory {
 	uint8_t *buffer;
@@ -20,4 +21,13 @@ uint32_t mem_read32(Memory *mem, uint32_t addr);
 void mem_write8(Memory *mem, uint32_t addr, uint8_t val);
 void mem_write16(Memory *mem, uint32_t addr, uint16_t val);
 void mem_write32(Memory *mem, uint32_t addr, uint32_t val);
+
+/*memory read write check variants return false instead
+of aborting an out of bound access*/
+bool mem_try_read8(Memory *mem, uint32_t addr, uint8_t *out);
+bool mem_try_read16(Memory *mem, uint32_t addr, uint16_t *out);
+bool mem_try_read32(Memory *mem, uint32_t addr, uint32_t *out);
+bool mem_try_write8(Memory *mem, uint32_t addr, uint8_t val);
+bool mem_try_write16(Memory *mem, uint32_t addr, uint16_t val);
+bool mem_try_write32(Memory *mem, uint32_t addr, uint32_t val);
 
