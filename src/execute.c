@@ -176,23 +176,32 @@ static uint32_t execute_load(CPU *cpu, Memory *mem, DecodedInstruction *instr, u
         {
             uint32_t rs1_val = cpu_read_reg(cpu, instr->rs1);
             uint32_t addr = rs1_val + (uint32_t)instr->imm;
-            int8_t byte = (int8_t)mem_read8(mem, addr);
-            cpu_write_reg(cpu, instr->rd, (uint32_t)(int32_t)byte);  // sign-extend
+            uint8_t byte_val;
+            if (!mem_try_read8(mem, addr, &byte_val)) {
+                return trap_enter(cpu, pc, 5, addr); // load access fault
+            }
+            cpu_write_reg(cpu, instr->rd, (uint32_t)(int32_t)(int8_t)byte_val);  // sign-extend
             return pc + 4;
         }
         case 0x1: // LH
         {
             uint32_t rs1_val = cpu_read_reg(cpu, instr->rs1);
             uint32_t addr = rs1_val + (uint32_t)instr->imm;
-            int16_t half = (int16_t)mem_read16(mem, addr);
-            cpu_write_reg(cpu, instr->rd, (uint32_t)(int32_t)half); // sign extended
+            uint16_t half_val;
+            if (!mem_try_read16(mem, addr, &half_val)) {
+                return trap_enter(cpu, pc, 5, addr); // load access fault
+            }
+            cpu_write_reg(cpu, instr->rd, (uint32_t)(int32_t)(int16_t)half_val); // sign extended
             return pc + 4;
         }
         case 0x2: // LW
         {
             uint32_t rs1_val = cpu_read_reg(cpu, instr->rs1);
             uint32_t addr = rs1_val + (uint32_t)instr->imm;
-            uint32_t word = mem_read32(mem, addr);
+            uint32_t word;
+            if (!mem_try_read32(mem, addr, &word)) {
+                return trap_enter(cpu, pc, 5, addr); // load access fault
+            }
             cpu_write_reg(cpu, instr->rd, word);
             return pc + 4;
         }
@@ -200,16 +209,22 @@ static uint32_t execute_load(CPU *cpu, Memory *mem, DecodedInstruction *instr, u
         {
             uint32_t rs1_val = cpu_read_reg(cpu, instr->rs1);
             uint32_t addr = rs1_val + (uint32_t)instr->imm;
-            uint8_t byte = mem_read8(mem, addr);
-            cpu_write_reg(cpu, instr->rd, (uint32_t)byte);           // zero-extend
+            uint8_t byte_val;
+            if (!mem_try_read8(mem, addr, &byte_val)) {
+                return trap_enter(cpu, pc, 5, addr); // load access fault
+            }
+            cpu_write_reg(cpu, instr->rd, (uint32_t)byte_val);           // zero-extend
             return pc + 4;
         }
         case 0x5: // LHU
         {
             uint32_t rs1_val = cpu_read_reg(cpu, instr->rs1);
             uint32_t addr = rs1_val + (uint32_t)instr->imm;
-            uint16_t half = mem_read16(mem, addr);
-            cpu_write_reg(cpu, instr->rd, (uint32_t)half); //zero-extended
+            uint16_t half_val;
+            if (!mem_try_read16(mem, addr, &half_val)) {
+                return trap_enter(cpu, pc, 5, addr); // load access fault
+            }
+            cpu_write_reg(cpu, instr->rd, (uint32_t)half_val); //zero-extended
             return pc + 4;
         }
         default:
@@ -225,7 +240,9 @@ static uint32_t execute_store(CPU *cpu, Memory *mem, DecodedInstruction *instr, 
             uint32_t rs1_val = cpu_read_reg(cpu, instr->rs1);
             uint32_t addr = rs1_val + (uint32_t)instr->imm;
             uint32_t rs2_val = cpu_read_reg(cpu, instr->rs2);
-            mem_write8(mem, addr, (uint8_t)rs2_val);
+            if (!mem_try_write8(mem, addr, (uint8_t)rs2_val)) {
+                return trap_enter(cpu, pc, 7, addr); // store/AMO access fault
+            }
             return pc + 4;
         }
         case 0x1: // SH
@@ -233,7 +250,9 @@ static uint32_t execute_store(CPU *cpu, Memory *mem, DecodedInstruction *instr, 
             uint32_t rs1_val = cpu_read_reg(cpu, instr->rs1);
             uint32_t addr = rs1_val + (uint32_t)instr->imm;
             uint32_t rs2_val = cpu_read_reg(cpu, instr->rs2);
-            mem_write16(mem, addr, (uint16_t)rs2_val);
+            if (!mem_try_write16(mem, addr, (uint16_t)rs2_val)) {
+                return trap_enter(cpu, pc, 7, addr); // store/AMO access fault
+            }
             return pc + 4;
         }
         case 0x2: // SW
@@ -241,7 +260,9 @@ static uint32_t execute_store(CPU *cpu, Memory *mem, DecodedInstruction *instr, 
             uint32_t rs1_val = cpu_read_reg(cpu, instr->rs1);
             uint32_t addr = rs1_val + (uint32_t)instr->imm;
             uint32_t rs2_val = cpu_read_reg(cpu, instr->rs2);
-            mem_write32(mem, addr, rs2_val);
+            if (!mem_try_write32(mem, addr, rs2_val)) {
+                return trap_enter(cpu, pc, 7, addr); // store/AMO access fault
+            }
             return pc + 4;
         }
         default:
