@@ -55,6 +55,17 @@ set_tests_properties(test_cpu_reg_oob PROPERTIES
     PASS_REGULAR_EXPRESSION "larger than 32"
 )
 
+add_executable(test_cpu_csr_oob test_cpu_csr_oob.c)
+target_link_libraries(test_cpu_csr_oob PRIVATE riscv_core)
+
+add_test(
+    NAME test_cpu_csr_oob
+    COMMAND ${CMAKE_COMMAND} -E env $<TARGET_FILE:test_cpu_csr_oob>
+)
+set_tests_properties(test_cpu_csr_oob PROPERTIES
+    PASS_REGULAR_EXPRESSION "larger than 0xFFF"
+)
+
 add_executable(test_ecall test_ecall.c)
 target_link_libraries(test_ecall PRIVATE riscv_core)
 
