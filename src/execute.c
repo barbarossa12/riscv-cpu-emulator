@@ -378,6 +378,15 @@ static uint32_t execute_system(CPU *cpu, Memory *mem, DecodedInstruction *instr,
                 return trap_enter(cpu, pc, 11, 0);
             } else if (instr->imm == 1) { // EBREAK
                 return trap_enter(cpu, pc, 3, 0);
+            } else if (instr->imm == 0x302) { // MRET
+                uint32_t mstatus = cpu_read_csr(cpu, CSR_MSTATUS);
+                uint32_t mpie = (mstatus & MSTATUS_MPIE) ? 1 : 0;
+                mstatus &= ~MSTATUS_MIE;
+                mstatus |= mpie ? MSTATUS_MIE : 0;  // MIE = old MPIE
+                mstatus |= MSTATUS_MPIE;            // MPIE = 1
+                // MPP stays M for now - no other privilege modes exist yet
+                cpu_write_csr(cpu, CSR_MSTATUS, mstatus);
+                return cpu_read_csr(cpu, CSR_MEPC); // jump back to where the trap occurred
             }
             LOG_FATAL("unexpected imm for opcode 0x73 funct3 0x0: imm=0x%x", instr->imm);
 
