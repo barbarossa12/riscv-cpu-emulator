@@ -862,6 +862,39 @@ void test_bgeu_not_taken(void) {
     mem_free(&mem);
 }
 
+void test_jal(void) {
+    CPU cpu = {0};
+    Memory mem;
+    mem_init(&mem, 32);
+
+    mem_write32(&mem, 0, 0x010000EF); // JAL x1, 16
+
+    uint32_t raw = mem_read32(&mem, cpu.pc);
+    DecodedInstruction instr = decode_instruction(raw);
+    execute(&cpu, &mem, &instr);
+
+    TEST_ASSERT_EQUAL_UINT32(4, cpu_read_reg(&cpu, 1));
+    TEST_ASSERT_EQUAL_UINT32(16, cpu.pc);
+    mem_free(&mem);
+}
+
+void test_jalr(void) {
+    CPU cpu = {0};
+    Memory mem;
+    mem_init(&mem, 32);
+
+    cpu_write_reg(&cpu, 2, 0x11);     // x2 = 0x11 (odd, to check bit-0 clearing)
+    mem_write32(&mem, 0, 0x004100E7); // JALR x1, 4(x2)
+
+    uint32_t raw = mem_read32(&mem, cpu.pc);
+    DecodedInstruction instr = decode_instruction(raw);
+    execute(&cpu, &mem, &instr);
+
+    TEST_ASSERT_EQUAL_UINT32(4, cpu_read_reg(&cpu, 1));
+    TEST_ASSERT_EQUAL_UINT32(0x14, cpu.pc);
+    mem_free(&mem);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_addi);
@@ -913,5 +946,7 @@ int main(void) {
     RUN_TEST(test_bltu_not_taken);
     RUN_TEST(test_bgeu_taken);
     RUN_TEST(test_bgeu_not_taken);
+    RUN_TEST(test_jal);
+    RUN_TEST(test_jalr);
 	return UNITY_END();
 }
