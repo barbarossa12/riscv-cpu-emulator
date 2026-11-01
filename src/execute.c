@@ -3,7 +3,6 @@
 
 void execute(CPU *cpu, Memory *mem, DecodedInstruction *instr) {
     uint32_t pc = cpu->pc;
-    (void)mem;
     switch(instr->opcode) {
         case 0x13: // I type ALU group
 
