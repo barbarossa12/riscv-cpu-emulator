@@ -692,6 +692,108 @@ void test_beq_not_taken(void) {
     mem_free(&mem);
 }
 
+void test_bne_taken(void) {
+    CPU cpu = {0};
+    Memory mem;
+    mem_init(&mem, 16);
+
+    cpu_write_reg(&cpu, 1, 5); // x1 = 5
+    cpu_write_reg(&cpu, 2, 9); // x2 = 9
+    mem_write32(&mem, 0, 0x00209463); // BNE x1, x2, 8
+
+    uint32_t raw = mem_read32(&mem, cpu.pc);
+    DecodedInstruction instr = decode_instruction(raw);
+    execute(&cpu, &mem, &instr);
+
+    TEST_ASSERT_EQUAL_UINT32(8, cpu.pc);
+    mem_free(&mem);
+}
+
+void test_bne_not_taken(void) {
+    CPU cpu = {0};
+    Memory mem;
+    mem_init(&mem, 16);
+
+    cpu_write_reg(&cpu, 1, 5); // x1 = 5
+    cpu_write_reg(&cpu, 2, 5); // x2 = 5
+    mem_write32(&mem, 0, 0x00209463); // BNE x1, x2, 8
+
+    uint32_t raw = mem_read32(&mem, cpu.pc);
+    DecodedInstruction instr = decode_instruction(raw);
+    execute(&cpu, &mem, &instr);
+
+    TEST_ASSERT_EQUAL_UINT32(4, cpu.pc);
+    mem_free(&mem);
+}
+
+void test_blt_taken(void) {
+    CPU cpu = {0};
+    Memory mem;
+    mem_init(&mem, 16);
+
+    cpu_write_reg(&cpu, 1, 0xFFFFFFFF); // x1 = -1
+    cpu_write_reg(&cpu, 2, 1);          // x2 = 1
+    mem_write32(&mem, 0, 0x0020C463);   // BLT x1, x2, 8
+
+    uint32_t raw = mem_read32(&mem, cpu.pc);
+    DecodedInstruction instr = decode_instruction(raw);
+    execute(&cpu, &mem, &instr);
+
+    TEST_ASSERT_EQUAL_UINT32(8, cpu.pc);
+    mem_free(&mem);
+}
+
+void test_blt_not_taken(void) {
+    CPU cpu = {0};
+    Memory mem;
+    mem_init(&mem, 16);
+
+    cpu_write_reg(&cpu, 1, 1);          // x1 = 1
+    cpu_write_reg(&cpu, 2, 0xFFFFFFFF); // x2 = -1
+    mem_write32(&mem, 0, 0x0020C463);   // BLT x1, x2, 8
+
+    uint32_t raw = mem_read32(&mem, cpu.pc);
+    DecodedInstruction instr = decode_instruction(raw);
+    execute(&cpu, &mem, &instr);
+
+    TEST_ASSERT_EQUAL_UINT32(4, cpu.pc);
+    mem_free(&mem);
+}
+
+void test_bge_taken(void) {
+    CPU cpu = {0};
+    Memory mem;
+    mem_init(&mem, 16);
+
+    cpu_write_reg(&cpu, 1, 1);          // x1 = 1
+    cpu_write_reg(&cpu, 2, 0xFFFFFFFF); // x2 = -1
+    mem_write32(&mem, 0, 0x0020D463);   // BGE x1, x2, 8
+
+    uint32_t raw = mem_read32(&mem, cpu.pc);
+    DecodedInstruction instr = decode_instruction(raw);
+    execute(&cpu, &mem, &instr);
+
+    TEST_ASSERT_EQUAL_UINT32(8, cpu.pc);
+    mem_free(&mem);
+}
+
+void test_bge_not_taken(void) {
+    CPU cpu = {0};
+    Memory mem;
+    mem_init(&mem, 16);
+
+    cpu_write_reg(&cpu, 1, 0xFFFFFFFF); // x1 = -1
+    cpu_write_reg(&cpu, 2, 1);          // x2 = 1
+    mem_write32(&mem, 0, 0x0020D463);   // BGE x1, x2, 8
+
+    uint32_t raw = mem_read32(&mem, cpu.pc);
+    DecodedInstruction instr = decode_instruction(raw);
+    execute(&cpu, &mem, &instr);
+
+    TEST_ASSERT_EQUAL_UINT32(4, cpu.pc);
+    mem_free(&mem);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_addi);
@@ -733,5 +835,11 @@ int main(void) {
     RUN_TEST(test_sw);
     RUN_TEST(test_beq_taken);
     RUN_TEST(test_beq_not_taken);
+    RUN_TEST(test_bne_taken);
+    RUN_TEST(test_bne_not_taken);
+    RUN_TEST(test_blt_taken);
+    RUN_TEST(test_blt_not_taken);
+    RUN_TEST(test_bge_taken);
+    RUN_TEST(test_bge_not_taken);
 	return UNITY_END();
 }
