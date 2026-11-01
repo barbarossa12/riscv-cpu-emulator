@@ -277,6 +277,27 @@ void execute(CPU *cpu, Memory *mem, DecodedInstruction *instr) {
         break;
         }
 
+        case 0x63: // branches
+        {
+            switch(instr->funct3) {
+                case 0x0: // BEQ
+                {
+                    uint32_t rs1_val = cpu_read_reg(cpu, instr->rs1);
+                    uint32_t rs2_val = cpu_read_reg(cpu, instr->rs2);
+                    if(rs1_val == rs2_val) {
+                        cpu->pc = pc + (uint32_t)instr->imm;
+                    } else {
+                        cpu->pc = pc + 4;
+                    }
+                    break;
+                }
+                default:
+                    LOG_FATAL("unimplemented funct3 for opcode 0x63: funct3=0x%x", instr->funct3);
+                break;
+            }
+        break;
+        }
+
         
 
         default:
