@@ -259,6 +259,16 @@ void execute(CPU *cpu, Memory *mem, DecodedInstruction *instr) {
                     cpu->pc = pc + 4;
                     break;
                 }
+
+                case 0x2: // SW
+                {
+                    uint32_t rs1_val = cpu_read_reg(cpu, instr->rs1);
+                    uint32_t addr = rs1_val + (uint32_t)instr->imm;
+                    uint32_t rs2_val = cpu_read_reg(cpu, instr->rs2);
+                    mem_write32(mem, addr, (uint32_t)rs2_val);
+                    cpu->pc = pc + 4;
+                    break;
+                }
                 default:
                             LOG_FATAL("unimplemented funct3 for opcode 0x23: funct3=0x%x", instr->funct3);
                 break;
