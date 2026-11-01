@@ -239,6 +239,7 @@ void execute(CPU *cpu, Memory *mem, DecodedInstruction *instr) {
             break;
         }
         case 0x23: // Stores
+        {
             switch(instr->funct3) {
                 case 0x0: // SB
                 {
@@ -274,6 +275,9 @@ void execute(CPU *cpu, Memory *mem, DecodedInstruction *instr) {
                 break;
             }
         break;
+        }
+
+        
 
         default:
             LOG_FATAL("unimplemented instruction: opcode=0x%x funct3=0x%x", instr->opcode, instr->funct3);
