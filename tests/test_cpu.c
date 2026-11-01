@@ -40,6 +40,21 @@ void test_cpu_write_to_x0_does_not_affect_other_registers(void) {
 	TEST_ASSERT_EQUAL_UINT32(0x42, val);
 }
 
+void test_cpu_csr_write_read_roundtrip(void) {
+	CPU test_cpu = {0};
+	cpu_write_csr(&test_cpu, CSR_MTVEC, 0x1000);
+	uint32_t val = cpu_read_csr(&test_cpu, CSR_MTVEC);
+	TEST_ASSERT_EQUAL_UINT32(0x1000, val);
+}
+
+void test_cpu_csr_writes_are_independent(void) {
+	CPU test_cpu = {0};
+	cpu_write_csr(&test_cpu, CSR_MEPC, 0xAAAA);
+	cpu_write_csr(&test_cpu, CSR_MCAUSE, 0xBBBB);
+	TEST_ASSERT_EQUAL_UINT32(0xAAAA, cpu_read_csr(&test_cpu, CSR_MEPC));
+	TEST_ASSERT_EQUAL_UINT32(0xBBBB, cpu_read_csr(&test_cpu, CSR_MCAUSE));
+}
+
 int main(void) {
 	UNITY_BEGIN();
 	RUN_TEST(test_cpu_write_read_roundtrip_x5);
@@ -47,6 +62,8 @@ int main(void) {
 	RUN_TEST(test_cpu_x0_read_ignores_underlying_value);
 	RUN_TEST(test_cpu_x0_write_is_discarded);
 	RUN_TEST(test_cpu_write_to_x0_does_not_affect_other_registers);
+	RUN_TEST(test_cpu_csr_write_read_roundtrip);
+	RUN_TEST(test_cpu_csr_writes_are_independent);
 	return UNITY_END();
 }
 
