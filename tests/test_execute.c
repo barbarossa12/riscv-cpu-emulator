@@ -1151,6 +1151,38 @@ void test_store_access_fault(void) {
     mem_free(&mem);
 }
 
+void test_mret_returns_to_mepc(void) {
+    CPU cpu = {0};
+    Memory mem;
+    mem_init(&mem, 16);
+
+    cpu_write_csr(&cpu, CSR_MEPC, 0x2000);
+    mem_write32(&mem, 0, 0x30200073); // MRET
+
+    uint32_t raw = mem_read32(&mem, cpu.pc);
+    DecodedInstruction instr = decode_instruction(raw);
+    execute(&cpu, &mem, &instr);
+
+    TEST_ASSERT_EQUAL_UINT32(0x2000, cpu.pc);
+    mem_free(&mem);
+}
+
+void test_mret_restores_mie_from_mpie(void) {
+    CPU cpu = {0};
+    Memory mem;
+    mem_init(&mem, 16);
+
+    cpu_write_csr(&cpu, CSR_MSTATUS, MSTATUS_MPIE); // MPIE set, MIE clear
+    mem_write32(&mem, 0, 0x30200073); // MRET
+
+    uint32_t raw = mem_read32(&mem, cpu.pc);
+    DecodedInstruction instr = decode_instruction(raw);
+    execute(&cpu, &mem, &instr);
+
+    TEST_ASSERT_EQUAL_UINT32(MSTATUS_MIE | MSTATUS_MPIE, cpu_read_csr(&cpu, CSR_MSTATUS));
+    mem_free(&mem);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_addi);
@@ -1218,5 +1250,7 @@ int main(void) {
     RUN_TEST(test_illegal_instruction_unknown_funct3);
     RUN_TEST(test_load_access_fault);
     RUN_TEST(test_store_access_fault);
+    RUN_TEST(test_mret_returns_to_mepc);
+    RUN_TEST(test_mret_restores_mie_from_mpie);
 	return UNITY_END();
 }
