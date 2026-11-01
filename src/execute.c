@@ -291,6 +291,39 @@ void execute(CPU *cpu, Memory *mem, DecodedInstruction *instr) {
                     }
                     break;
                 }
+                case 0x1: // BNE
+                {
+                    uint32_t rs1_val = cpu_read_reg(cpu, instr->rs1);
+                    uint32_t rs2_val = cpu_read_reg(cpu, instr->rs2);
+                    if(rs1_val != rs2_val) {
+                        cpu->pc = pc + (uint32_t)instr->imm;
+                    } else {
+                        cpu->pc = pc + 4;
+                    }
+                    break;
+                }
+                case 0x4: // BLT
+                {
+                    uint32_t rs1_val = cpu_read_reg(cpu, instr->rs1);
+                    uint32_t rs2_val = cpu_read_reg(cpu, instr->rs2);
+                    if((int32_t)rs1_val < (int32_t)rs2_val) {
+                        cpu->pc = pc + (uint32_t)instr->imm;
+                    } else {
+                        cpu->pc = pc + 4;
+                    }
+                    break;
+                }
+                case 0x5: // BGE
+                {
+                    uint32_t rs1_val = cpu_read_reg(cpu, instr->rs1);
+                    uint32_t rs2_val = cpu_read_reg(cpu, instr->rs2);
+                    if((int32_t)rs1_val >= (int32_t)rs2_val) {
+                        cpu->pc = pc + (uint32_t)instr->imm;
+                    } else {
+                        cpu->pc = pc + 4;
+                    }
+                    break;
+                }
                 default:
                     LOG_FATAL("unimplemented funct3 for opcode 0x63: funct3=0x%x", instr->funct3);
                 break;
