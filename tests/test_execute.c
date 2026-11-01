@@ -910,6 +910,170 @@ void test_fence(void) {
     mem_free(&mem);
 }
 
+void test_csrrw(void) {
+    CPU cpu = {0};
+    Memory mem;
+    mem_init(&mem, 16);
+
+    cpu_write_csr(&cpu, CSR_MSCRATCH, 0x11111111); // old CSR value
+    cpu_write_reg(&cpu, 1, 0x22222222);            // x1 = new value to write
+    mem_write32(&mem, 0, 0x34009173);              // CSRRW x2, mscratch, x1
+
+    uint32_t raw = mem_read32(&mem, cpu.pc);
+    DecodedInstruction instr = decode_instruction(raw);
+    execute(&cpu, &mem, &instr);
+
+    TEST_ASSERT_EQUAL_UINT32(0x11111111, cpu_read_reg(&cpu, 2));
+    TEST_ASSERT_EQUAL_UINT32(0x22222222, cpu_read_csr(&cpu, CSR_MSCRATCH));
+    TEST_ASSERT_EQUAL_UINT32(4, cpu.pc);
+    mem_free(&mem);
+}
+
+void test_csrrs(void) {
+    CPU cpu = {0};
+    Memory mem;
+    mem_init(&mem, 16);
+
+    cpu_write_csr(&cpu, CSR_MSCRATCH, 0xF0F0F0F0); // old CSR value
+    cpu_write_reg(&cpu, 1, 0x0F0F0F0F);            // x1 = set-mask
+    mem_write32(&mem, 0, 0x3400A173);              // CSRRS x2, mscratch, x1
+
+    uint32_t raw = mem_read32(&mem, cpu.pc);
+    DecodedInstruction instr = decode_instruction(raw);
+    execute(&cpu, &mem, &instr);
+
+    TEST_ASSERT_EQUAL_UINT32(0xF0F0F0F0, cpu_read_reg(&cpu, 2));
+    TEST_ASSERT_EQUAL_UINT32(0xFFFFFFFF, cpu_read_csr(&cpu, CSR_MSCRATCH));
+    TEST_ASSERT_EQUAL_UINT32(4, cpu.pc);
+    mem_free(&mem);
+}
+
+void test_csrrc(void) {
+    CPU cpu = {0};
+    Memory mem;
+    mem_init(&mem, 16);
+
+    cpu_write_csr(&cpu, CSR_MSCRATCH, 0xFFFFFFFF); // old CSR value
+    cpu_write_reg(&cpu, 1, 0x0F0F0F0F);            // x1 = clear-mask
+    mem_write32(&mem, 0, 0x3400B173);              // CSRRC x2, mscratch, x1
+
+    uint32_t raw = mem_read32(&mem, cpu.pc);
+    DecodedInstruction instr = decode_instruction(raw);
+    execute(&cpu, &mem, &instr);
+
+    TEST_ASSERT_EQUAL_UINT32(0xFFFFFFFF, cpu_read_reg(&cpu, 2));
+    TEST_ASSERT_EQUAL_UINT32(0xF0F0F0F0, cpu_read_csr(&cpu, CSR_MSCRATCH));
+    TEST_ASSERT_EQUAL_UINT32(4, cpu.pc);
+    mem_free(&mem);
+}
+
+void test_csrrwi(void) {
+    CPU cpu = {0};
+    Memory mem;
+    mem_init(&mem, 16);
+
+    cpu_write_csr(&cpu, CSR_MSCRATCH, 0x11111111); // old CSR value
+    mem_write32(&mem, 0, 0x340FD173);              // CSRRWI x2, mscratch, 31
+
+    uint32_t raw = mem_read32(&mem, cpu.pc);
+    DecodedInstruction instr = decode_instruction(raw);
+    execute(&cpu, &mem, &instr);
+
+    TEST_ASSERT_EQUAL_UINT32(0x11111111, cpu_read_reg(&cpu, 2));
+    TEST_ASSERT_EQUAL_UINT32(0x1F, cpu_read_csr(&cpu, CSR_MSCRATCH));
+    TEST_ASSERT_EQUAL_UINT32(4, cpu.pc);
+    mem_free(&mem);
+}
+
+void test_csrrsi(void) {
+    CPU cpu = {0};
+    Memory mem;
+    mem_init(&mem, 16);
+
+    cpu_write_csr(&cpu, CSR_MSCRATCH, 0xFFFFFFE0); // old CSR value (low 5 bits clear)
+    mem_write32(&mem, 0, 0x340FE173);              // CSRRSI x2, mscratch, 31
+
+    uint32_t raw = mem_read32(&mem, cpu.pc);
+    DecodedInstruction instr = decode_instruction(raw);
+    execute(&cpu, &mem, &instr);
+
+    TEST_ASSERT_EQUAL_UINT32(0xFFFFFFE0, cpu_read_reg(&cpu, 2));
+    TEST_ASSERT_EQUAL_UINT32(0xFFFFFFFF, cpu_read_csr(&cpu, CSR_MSCRATCH));
+    TEST_ASSERT_EQUAL_UINT32(4, cpu.pc);
+    mem_free(&mem);
+}
+
+void test_csrrci(void) {
+    CPU cpu = {0};
+    Memory mem;
+    mem_init(&mem, 16);
+
+    cpu_write_csr(&cpu, CSR_MSCRATCH, 0xFFFFFFFF); // old CSR value
+    mem_write32(&mem, 0, 0x340FF173);              // CSRRCI x2, mscratch, 31
+
+    uint32_t raw = mem_read32(&mem, cpu.pc);
+    DecodedInstruction instr = decode_instruction(raw);
+    execute(&cpu, &mem, &instr);
+
+    TEST_ASSERT_EQUAL_UINT32(0xFFFFFFFF, cpu_read_reg(&cpu, 2));
+    TEST_ASSERT_EQUAL_UINT32(0xFFFFFFE0, cpu_read_csr(&cpu, CSR_MSCRATCH));
+    TEST_ASSERT_EQUAL_UINT32(4, cpu.pc);
+    mem_free(&mem);
+}
+
+void test_ecall_traps(void) {
+    CPU cpu = {0};
+    Memory mem;
+    mem_init(&mem, 16);
+
+    cpu_write_csr(&cpu, CSR_MTVEC, 0x1000);
+    mem_write32(&mem, 0, 0x00000073); // ECALL
+
+    uint32_t raw = mem_read32(&mem, cpu.pc);
+    DecodedInstruction instr = decode_instruction(raw);
+    execute(&cpu, &mem, &instr);
+
+    TEST_ASSERT_EQUAL_UINT32(0x1000, cpu.pc);
+    TEST_ASSERT_EQUAL_UINT32(0, cpu_read_csr(&cpu, CSR_MEPC));
+    TEST_ASSERT_EQUAL_UINT32(11, cpu_read_csr(&cpu, CSR_MCAUSE));
+    mem_free(&mem);
+}
+
+void test_ebreak_traps(void) {
+    CPU cpu = {0};
+    Memory mem;
+    mem_init(&mem, 16);
+
+    cpu_write_csr(&cpu, CSR_MTVEC, 0x1000);
+    mem_write32(&mem, 0, 0x00100073); // EBREAK
+
+    uint32_t raw = mem_read32(&mem, cpu.pc);
+    DecodedInstruction instr = decode_instruction(raw);
+    execute(&cpu, &mem, &instr);
+
+    TEST_ASSERT_EQUAL_UINT32(0x1000, cpu.pc);
+    TEST_ASSERT_EQUAL_UINT32(0, cpu_read_csr(&cpu, CSR_MEPC));
+    TEST_ASSERT_EQUAL_UINT32(3, cpu_read_csr(&cpu, CSR_MCAUSE));
+    mem_free(&mem);
+}
+
+void test_ecall_mstatus_update(void) {
+    CPU cpu = {0};
+    Memory mem;
+    mem_init(&mem, 16);
+
+    cpu_write_csr(&cpu, CSR_MTVEC, 0x1000);
+    cpu_write_csr(&cpu, CSR_MSTATUS, MSTATUS_MIE); // MIE set before the trap
+    mem_write32(&mem, 0, 0x00000073); // ECALL
+
+    uint32_t raw = mem_read32(&mem, cpu.pc);
+    DecodedInstruction instr = decode_instruction(raw);
+    execute(&cpu, &mem, &instr);
+
+    TEST_ASSERT_EQUAL_UINT32(MSTATUS_MPIE | MSTATUS_MPP, cpu_read_csr(&cpu, CSR_MSTATUS));
+    mem_free(&mem);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_addi);
@@ -964,5 +1128,14 @@ int main(void) {
     RUN_TEST(test_jal);
     RUN_TEST(test_jalr);
     RUN_TEST(test_fence);
+    RUN_TEST(test_csrrw);
+    RUN_TEST(test_csrrs);
+    RUN_TEST(test_csrrc);
+    RUN_TEST(test_csrrwi);
+    RUN_TEST(test_csrrsi);
+    RUN_TEST(test_csrrci);
+    RUN_TEST(test_ecall_traps);
+    RUN_TEST(test_ebreak_traps);
+    RUN_TEST(test_ecall_mstatus_update);
 	return UNITY_END();
 }
