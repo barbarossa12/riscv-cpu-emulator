@@ -378,6 +378,31 @@ void execute(CPU *cpu, Memory *mem, DecodedInstruction *instr) {
             break;
         }
 
+        case 0x0F: // FENCE
+        {
+            switch(instr->funct3) {
+                case 0x0:
+                    cpu->pc = pc + 4; // no-op: single-hart, in-order emulator
+                    break;
+                default:
+                    LOG_FATAL("unimplemented funct3 for opcode 0x0F: funct3=0x%x", instr->funct3);
+                break;
+            }
+            break;
+        }
+
+        case 0x73: // ECALL / EBREAK
+        {
+            switch(instr->funct3) {
+                case 0x0:
+                    LOG_FATAL("ECALL/EBREAK not yet implemented (imm=0x%x)", instr->imm);
+                    break;
+                default:
+                    LOG_FATAL("unimplemented funct3 for opcode 0x73: funct3=0x%x", instr->funct3);
+                break;
+            }
+            break;
+        }
 
 
         default:
