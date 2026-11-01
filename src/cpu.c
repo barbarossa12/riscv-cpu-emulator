@@ -27,3 +27,16 @@ void cpu_write_reg(CPU *cpu, uint8_t index, uint32_t value) {
 	cpu->regs[index] = value;
 }
 
+uint32_t cpu_read_csr(CPU *cpu, uint16_t addr){
+	if(addr > 0xFFF) {
+		LOG_FATAL("CPU CSR register value larger than 0xFFF: 0x%x", addr);
+	}
+	return cpu->csr[addr];
+}
+
+void cpu_write_csr(CPU *cpu, uint16_t addr, uint32_t value) {
+	if(addr > 0xFFF) {
+		LOG_FATAL("CPU CSR register value larger than 0xFFF: 0x%x", addr);
+	}
+	cpu->csr[addr] = value;	
+}
