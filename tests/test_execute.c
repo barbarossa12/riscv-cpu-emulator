@@ -1112,6 +1112,45 @@ void test_illegal_instruction_unknown_funct3(void) {
     mem_free(&mem);
 }
 
+void test_load_access_fault(void) {
+    CPU cpu = {0};
+    Memory mem;
+    mem_init(&mem, 16);
+
+    cpu_write_csr(&cpu, CSR_MTVEC, 0x1000);
+    mem_write32(&mem, 0, 0x0140A103); // LW x2, 20(x1), x1 = 0 -> addr 20 (OOB)
+
+    uint32_t raw = mem_read32(&mem, cpu.pc);
+    DecodedInstruction instr = decode_instruction(raw);
+    execute(&cpu, &mem, &instr);
+
+    TEST_ASSERT_EQUAL_UINT32(0x1000, cpu.pc);
+    TEST_ASSERT_EQUAL_UINT32(5, cpu_read_csr(&cpu, CSR_MCAUSE));
+    TEST_ASSERT_EQUAL_UINT32(20, cpu_read_csr(&cpu, CSR_MTVAL));
+    TEST_ASSERT_EQUAL_UINT32(0, cpu_read_csr(&cpu, CSR_MEPC));
+    mem_free(&mem);
+}
+
+void test_store_access_fault(void) {
+    CPU cpu = {0};
+    Memory mem;
+    mem_init(&mem, 16);
+
+    cpu_write_csr(&cpu, CSR_MTVEC, 0x1000);
+    cpu_write_reg(&cpu, 2, 0xDEADBEEF);
+    mem_write32(&mem, 0, 0x0020AA23); // SW x2, 20(x1), x1 = 0 -> addr 20 (OOB)
+
+    uint32_t raw = mem_read32(&mem, cpu.pc);
+    DecodedInstruction instr = decode_instruction(raw);
+    execute(&cpu, &mem, &instr);
+
+    TEST_ASSERT_EQUAL_UINT32(0x1000, cpu.pc);
+    TEST_ASSERT_EQUAL_UINT32(7, cpu_read_csr(&cpu, CSR_MCAUSE));
+    TEST_ASSERT_EQUAL_UINT32(20, cpu_read_csr(&cpu, CSR_MTVAL));
+    TEST_ASSERT_EQUAL_UINT32(0, cpu_read_csr(&cpu, CSR_MEPC));
+    mem_free(&mem);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_addi);
@@ -1177,5 +1216,7 @@ int main(void) {
     RUN_TEST(test_ecall_mstatus_update);
     RUN_TEST(test_illegal_instruction_unknown_opcode);
     RUN_TEST(test_illegal_instruction_unknown_funct3);
+    RUN_TEST(test_load_access_fault);
+    RUN_TEST(test_store_access_fault);
 	return UNITY_END();
 }
