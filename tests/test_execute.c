@@ -794,6 +794,74 @@ void test_bge_not_taken(void) {
     mem_free(&mem);
 }
 
+void test_bltu_taken(void) {
+    CPU cpu = {0};
+    Memory mem;
+    mem_init(&mem, 16);
+
+    cpu_write_reg(&cpu, 1, 1);          // x1 = 1
+    cpu_write_reg(&cpu, 2, 0xFFFFFFFF); // x2 = 0xFFFFFFFF
+    mem_write32(&mem, 0, 0x0020E463);   // BLTU x1, x2, 8
+
+    uint32_t raw = mem_read32(&mem, cpu.pc);
+    DecodedInstruction instr = decode_instruction(raw);
+    execute(&cpu, &mem, &instr);
+
+    TEST_ASSERT_EQUAL_UINT32(8, cpu.pc);
+    mem_free(&mem);
+}
+
+void test_bltu_not_taken(void) {
+    CPU cpu = {0};
+    Memory mem;
+    mem_init(&mem, 16);
+
+    cpu_write_reg(&cpu, 1, 0xFFFFFFFF); // x1 = 0xFFFFFFFF
+    cpu_write_reg(&cpu, 2, 1);          // x2 = 1
+    mem_write32(&mem, 0, 0x0020E463);   // BLTU x1, x2, 8
+
+    uint32_t raw = mem_read32(&mem, cpu.pc);
+    DecodedInstruction instr = decode_instruction(raw);
+    execute(&cpu, &mem, &instr);
+
+    TEST_ASSERT_EQUAL_UINT32(4, cpu.pc);
+    mem_free(&mem);
+}
+
+void test_bgeu_taken(void) {
+    CPU cpu = {0};
+    Memory mem;
+    mem_init(&mem, 16);
+
+    cpu_write_reg(&cpu, 1, 0xFFFFFFFF); // x1 = 0xFFFFFFFF
+    cpu_write_reg(&cpu, 2, 1);          // x2 = 1
+    mem_write32(&mem, 0, 0x0020F463);   // BGEU x1, x2, 8
+
+    uint32_t raw = mem_read32(&mem, cpu.pc);
+    DecodedInstruction instr = decode_instruction(raw);
+    execute(&cpu, &mem, &instr);
+
+    TEST_ASSERT_EQUAL_UINT32(8, cpu.pc);
+    mem_free(&mem);
+}
+
+void test_bgeu_not_taken(void) {
+    CPU cpu = {0};
+    Memory mem;
+    mem_init(&mem, 16);
+
+    cpu_write_reg(&cpu, 1, 1);          // x1 = 1
+    cpu_write_reg(&cpu, 2, 0xFFFFFFFF); // x2 = 0xFFFFFFFF
+    mem_write32(&mem, 0, 0x0020F463);   // BGEU x1, x2, 8
+
+    uint32_t raw = mem_read32(&mem, cpu.pc);
+    DecodedInstruction instr = decode_instruction(raw);
+    execute(&cpu, &mem, &instr);
+
+    TEST_ASSERT_EQUAL_UINT32(4, cpu.pc);
+    mem_free(&mem);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_addi);
@@ -841,5 +909,9 @@ int main(void) {
     RUN_TEST(test_blt_not_taken);
     RUN_TEST(test_bge_taken);
     RUN_TEST(test_bge_not_taken);
+    RUN_TEST(test_bltu_taken);
+    RUN_TEST(test_bltu_not_taken);
+    RUN_TEST(test_bgeu_taken);
+    RUN_TEST(test_bgeu_not_taken);
 	return UNITY_END();
 }
