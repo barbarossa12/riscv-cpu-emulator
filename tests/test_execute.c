@@ -658,6 +658,40 @@ void test_sw(void) {
     mem_free(&mem);
 }
 
+void test_beq_taken(void) {
+    CPU cpu = {0};
+    Memory mem;
+    mem_init(&mem, 16);
+
+    cpu_write_reg(&cpu, 1, 5); // x1 = 5
+    cpu_write_reg(&cpu, 2, 5); // x2 = 5
+    mem_write32(&mem, 0, 0x00208463); // BEQ x1, x2, 8
+
+    uint32_t raw = mem_read32(&mem, cpu.pc);
+    DecodedInstruction instr = decode_instruction(raw);
+    execute(&cpu, &mem, &instr);
+
+    TEST_ASSERT_EQUAL_UINT32(8, cpu.pc);
+    mem_free(&mem);
+}
+
+void test_beq_not_taken(void) {
+    CPU cpu = {0};
+    Memory mem;
+    mem_init(&mem, 16);
+
+    cpu_write_reg(&cpu, 1, 5); // x1 = 5
+    cpu_write_reg(&cpu, 2, 9); // x2 = 9
+    mem_write32(&mem, 0, 0x00208463); // BEQ x1, x2, 8
+
+    uint32_t raw = mem_read32(&mem, cpu.pc);
+    DecodedInstruction instr = decode_instruction(raw);
+    execute(&cpu, &mem, &instr);
+
+    TEST_ASSERT_EQUAL_UINT32(4, cpu.pc);
+    mem_free(&mem);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_addi);
@@ -697,5 +731,7 @@ int main(void) {
     RUN_TEST(test_sb);
     RUN_TEST(test_sh);
     RUN_TEST(test_sw);
+    RUN_TEST(test_beq_taken);
+    RUN_TEST(test_beq_not_taken);
 	return UNITY_END();
 }
