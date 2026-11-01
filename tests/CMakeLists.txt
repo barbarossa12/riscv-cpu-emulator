@@ -55,3 +55,25 @@ set_tests_properties(test_cpu_reg_oob PROPERTIES
     PASS_REGULAR_EXPRESSION "larger than 32"
 )
 
+add_executable(test_ecall test_ecall.c)
+target_link_libraries(test_ecall PRIVATE riscv_core)
+
+add_test(
+    NAME test_ecall
+    COMMAND ${CMAKE_COMMAND} -E env $<TARGET_FILE:test_ecall>
+)
+set_tests_properties(test_ecall PROPERTIES
+    PASS_REGULAR_EXPRESSION "not yet implemented"
+)
+
+add_executable(test_ebreak test_ebreak.c)
+target_link_libraries(test_ebreak PRIVATE riscv_core)
+
+add_test(
+    NAME test_ebreak
+    COMMAND ${CMAKE_COMMAND} -E env $<TARGET_FILE:test_ebreak>
+)
+set_tests_properties(test_ebreak PROPERTIES
+    PASS_REGULAR_EXPRESSION "not yet implemented"
+)
+
