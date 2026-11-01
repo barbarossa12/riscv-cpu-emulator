@@ -895,6 +895,21 @@ void test_jalr(void) {
     mem_free(&mem);
 }
 
+void test_fence(void) {
+    CPU cpu = {0};
+    Memory mem;
+    mem_init(&mem, 16);
+
+    mem_write32(&mem, 0, 0x0000000F); // FENCE
+
+    uint32_t raw = mem_read32(&mem, cpu.pc);
+    DecodedInstruction instr = decode_instruction(raw);
+    execute(&cpu, &mem, &instr);
+
+    TEST_ASSERT_EQUAL_UINT32(4, cpu.pc);
+    mem_free(&mem);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_addi);
@@ -948,5 +963,6 @@ int main(void) {
     RUN_TEST(test_bgeu_not_taken);
     RUN_TEST(test_jal);
     RUN_TEST(test_jalr);
+    RUN_TEST(test_fence);
 	return UNITY_END();
 }
