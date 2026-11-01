@@ -75,8 +75,7 @@ static uint32_t execute_op_imm(CPU *cpu, Memory *mem, DecodedInstruction *instr,
             return pc + 4;
         }
         default:
-            LOG_FATAL("unimplemented funct3 for opcode 0x13: funct3=0x%x", instr->funct3);
-        break;
+            return trap_enter(cpu, pc, 2, instr->raw); // illegal instruction
     }
     return pc + 4;
 }
@@ -154,8 +153,7 @@ static uint32_t execute_op(CPU *cpu, Memory *mem, DecodedInstruction *instr, uin
             return pc + 4;
         }
         default:
-            LOG_FATAL("unimplemented funct3 for opcode 0x33: funct3=0x%x", instr->funct3);
-        break;
+            return trap_enter(cpu, pc, 2, instr->raw); // illegal instruction
     }
     return pc + 4;
 }
@@ -215,8 +213,7 @@ static uint32_t execute_load(CPU *cpu, Memory *mem, DecodedInstruction *instr, u
             return pc + 4;
         }
         default:
-            LOG_FATAL("unimplemented funct3 for opcode 0x03: funct3=0x%x", instr->funct3);
-        break;
+            return trap_enter(cpu, pc, 2, instr->raw); // illegal instruction
     }
     return pc + 4;
 }
@@ -248,8 +245,7 @@ static uint32_t execute_store(CPU *cpu, Memory *mem, DecodedInstruction *instr, 
             return pc + 4;
         }
         default:
-            LOG_FATAL("unimplemented funct3 for opcode 0x23: funct3=0x%x", instr->funct3);
-        break;
+            return trap_enter(cpu, pc, 2, instr->raw); // illegal instruction
     }
     return pc + 4;
 }
@@ -312,8 +308,7 @@ static uint32_t execute_branch(CPU *cpu, Memory *mem, DecodedInstruction *instr,
             return pc + 4;
         }
         default:
-            LOG_FATAL("unimplemented funct3 for opcode 0x63: funct3=0x%x", instr->funct3);
-        break;
+            return trap_enter(cpu, pc, 2, instr->raw); // illegal instruction
     }
     return pc + 4;
 }
@@ -335,8 +330,7 @@ static uint32_t execute_jalr(CPU *cpu, Memory *mem, DecodedInstruction *instr, u
             return target;
         }
         default:
-            LOG_FATAL("unimplemented funct3 for opcode 0x67: funct3=0x%x", instr->funct3);
-        break;
+            return trap_enter(cpu, pc, 2, instr->raw); // illegal instruction
     }
     return pc + 4;
 }
@@ -348,8 +342,7 @@ static uint32_t execute_fence(CPU *cpu, Memory *mem, DecodedInstruction *instr, 
         case 0x0:
             return pc + 4; // no-op: single-hart, in-order emulator
         default:
-            LOG_FATAL("unimplemented funct3 for opcode 0x0F: funct3=0x%x", instr->funct3);
-        break;
+            return trap_enter(cpu, pc, 2, instr->raw); // illegal instruction
     }
     return pc + 4;
 }
@@ -414,8 +407,7 @@ static uint32_t execute_system(CPU *cpu, Memory *mem, DecodedInstruction *instr,
             return pc + 4;
         }
         default:
-            LOG_FATAL("unimplemented funct3 for opcode 0x73: funct3=0x%x", instr->funct3);
-        break;
+            return trap_enter(cpu, pc, 2, instr->raw); // illegal instruction
     }
     return pc + 4;
 }
@@ -449,6 +441,7 @@ void execute(CPU *cpu, Memory *mem, DecodedInstruction *instr) {
         case 0x0F: cpu->pc = execute_fence(cpu, mem, instr, pc); break;
         case 0x73: cpu->pc = execute_system(cpu, mem, instr, pc); break;
         default:
-            LOG_FATAL("unimplemented instruction: opcode=0x%x funct3=0x%x", instr->opcode, instr->funct3);
+            cpu->pc = trap_enter(cpu, pc, 2, instr->raw); // illegal instruction
+        break;
     }
 }
