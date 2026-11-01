@@ -10,6 +10,10 @@
 #define CSR_MTVAL    0x343
 #define CSR_MIP      0x344
 
+#define MSTATUS_MIE  (1u << 3)
+#define MSTATUS_MPIE (1u << 7)
+#define MSTATUS_MPP  (3u << 11)
+
 
 typedef struct CPU {
 	uint32_t regs[32];
