@@ -185,6 +185,7 @@ void execute(CPU *cpu, Memory *mem, DecodedInstruction *instr) {
         }
 
         case 0x03:
+        {
             switch(instr->funct3) {
                 case 0x0: // LB
                     {
@@ -236,6 +237,33 @@ void execute(CPU *cpu, Memory *mem, DecodedInstruction *instr) {
                 break;
             }
             break;
+        }
+        case 0x23: // Stores
+            switch(instr->funct3) {
+                case 0x0: // SB
+                {
+                    uint32_t rs1_val = cpu_read_reg(cpu, instr->rs1);
+                    uint32_t addr = rs1_val + (uint32_t)instr->imm;
+                    uint32_t rs2_val = cpu_read_reg(cpu, instr->rs2);
+                    mem_write8(mem, addr, (uint8_t)rs2_val);
+                    cpu->pc = pc + 4;
+                    break;
+                }
+
+                case 0x1: // SH
+                {
+                    uint32_t rs1_val = cpu_read_reg(cpu, instr->rs1);
+                    uint32_t addr = rs1_val + (uint32_t)instr->imm;
+                    uint32_t rs2_val = cpu_read_reg(cpu, instr->rs2);
+                    mem_write16(mem, addr, (uint16_t)rs2_val);
+                    cpu->pc = pc + 4;
+                    break;
+                }
+                default:
+                            LOG_FATAL("unimplemented funct3 for opcode 0x23: funct3=0x%x", instr->funct3);
+                break;
+            }
+        break;
 
         default:
             LOG_FATAL("unimplemented instruction: opcode=0x%x funct3=0x%x", instr->opcode, instr->funct3);
