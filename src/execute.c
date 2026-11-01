@@ -12,6 +12,8 @@ static uint32_t execute_jal(CPU *cpu, Memory *mem, DecodedInstruction *instr, ui
 static uint32_t execute_jalr(CPU *cpu, Memory *mem, DecodedInstruction *instr, uint32_t pc);
 static uint32_t execute_fence(CPU *cpu, Memory *mem, DecodedInstruction *instr, uint32_t pc);
 static uint32_t execute_system(CPU *cpu, Memory *mem, DecodedInstruction *instr, uint32_t pc);
+static uint32_t trap_enter(CPU *cpu, uint32_t pc, uint32_t cause, uint32_t tval);
+
 
 static uint32_t execute_op_imm(CPU *cpu, Memory *mem, DecodedInstruction *instr, uint32_t pc) {
     (void)mem;
@@ -352,18 +354,84 @@ static uint32_t execute_fence(CPU *cpu, Memory *mem, DecodedInstruction *instr, 
     return pc + 4;
 }
 
+
 static uint32_t execute_system(CPU *cpu, Memory *mem, DecodedInstruction *instr, uint32_t pc) {
-    (void)cpu;
     (void)mem;
+    uint16_t csr_addr = (uint16_t)(instr->imm & 0xFFF);
     switch (instr->funct3) {
         case 0x0:
-            LOG_FATAL("ECALL/EBREAK not yet implemented (imm=0x%x)", instr->imm);
+            if(instr->imm == 0) { // ECALL
+                return trap_enter(cpu, pc, 11, 0);
+            } else if (instr->imm == 1) { // EBREAK
+                return trap_enter(cpu, pc, 3, 0);
+            }
+            LOG_FATAL("unexpected imm for opcode 0x73 funct3 0x0: imm=0x%x", instr->imm);
+
         break;
+        case 0x1: // CSRRW
+        {
+            uint32_t rs1_val = cpu_read_reg(cpu, instr->rs1);
+            uint32_t old = cpu_read_csr(cpu, csr_addr);
+            cpu_write_csr(cpu, csr_addr, rs1_val);
+            cpu_write_reg(cpu, instr->rd, old);
+            return pc + 4;
+        }
+        case 0x2: // CSRRS
+        {
+            uint32_t rs1_val = cpu_read_reg(cpu, instr->rs1);
+            uint32_t old = cpu_read_csr(cpu, csr_addr);
+            cpu_write_csr(cpu, csr_addr, old | rs1_val);
+            cpu_write_reg(cpu, instr->rd, old);
+            return pc + 4;
+        }
+        case 0x3: // CSRRC
+        {
+            uint32_t rs1_val = cpu_read_reg(cpu, instr->rs1);
+            uint32_t old = cpu_read_csr(cpu, csr_addr);
+            cpu_write_csr(cpu, csr_addr, old & ~rs1_val);
+            cpu_write_reg(cpu, instr->rd, old);
+            return pc + 4;
+        }
+        case 0x5: // CSRRWI
+        {
+            uint32_t old = cpu_read_csr(cpu, csr_addr);
+            cpu_write_csr(cpu, csr_addr, (uint32_t)instr->rs1); // rs1 field holds uimm here
+            cpu_write_reg(cpu, instr->rd, old);
+            return pc + 4;
+        }
+        case 0x6: // CSRRSI
+        {
+            uint32_t old = cpu_read_csr(cpu, csr_addr);
+            cpu_write_csr(cpu, csr_addr, old | (uint32_t)instr->rs1);
+            cpu_write_reg(cpu, instr->rd, old);
+            return pc + 4;
+        }
+        case 0x7: // CSRRCI
+        {
+            uint32_t old = cpu_read_csr(cpu, csr_addr);
+            cpu_write_csr(cpu, csr_addr, old & ~(uint32_t)instr->rs1);
+            cpu_write_reg(cpu, instr->rd, old);
+            return pc + 4;
+        }
         default:
             LOG_FATAL("unimplemented funct3 for opcode 0x73: funct3=0x%x", instr->funct3);
         break;
     }
     return pc + 4;
+}
+
+static uint32_t trap_enter(CPU *cpu, uint32_t pc, uint32_t cause, uint32_t tval) {
+    uint32_t mstatus = cpu_read_csr(cpu, CSR_MSTATUS);
+    uint32_t mie = (mstatus & MSTATUS_MIE) ? 1 : 0;
+    mstatus &= ~(MSTATUS_MPIE | MSTATUS_MIE | MSTATUS_MPP);
+    mstatus |= mie ? MSTATUS_MPIE : 0;  // MPIE = old MIE
+    mstatus |= (3u << 11);              // MPP = M-mode (always, for now)
+    cpu_write_csr(cpu, CSR_MSTATUS, mstatus);
+
+    cpu_write_csr(cpu, CSR_MEPC, pc);
+    cpu_write_csr(cpu, CSR_MCAUSE, cause);
+    cpu_write_csr(cpu, CSR_MTVAL, tval);
+    return cpu_read_csr(cpu, CSR_MTVEC);
 }
 
 void execute(CPU *cpu, Memory *mem, DecodedInstruction *instr) {
