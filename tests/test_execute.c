@@ -1151,6 +1151,92 @@ void test_store_access_fault(void) {
     mem_free(&mem);
 }
 
+/* x1 = 0, so a negative offset gives an address near the top of the 32-bit space.
+ * The address computation wraps (correct), but the access must still fault. */
+void test_load_access_fault_wrap(void) {
+    CPU cpu = {0};
+    Memory mem;
+    mem_init(&mem, 16);
+
+    cpu_write_csr(&cpu, CSR_MTVEC, 0x1000);
+    cpu_write_reg(&cpu, 2, 0xDEADBEEF);
+    mem_write32(&mem, 0, 0xFFC02103); // LW x2, -4(x0) -> addr 0xFFFFFFFC
+
+    uint32_t raw = mem_read32(&mem, cpu.pc);
+    DecodedInstruction instr = decode_instruction(raw);
+    execute(&cpu, &mem, &instr);
+
+    TEST_ASSERT_EQUAL_UINT32(0x1000, cpu.pc);
+    TEST_ASSERT_EQUAL_UINT32(5, cpu_read_csr(&cpu, CSR_MCAUSE));
+    TEST_ASSERT_EQUAL_UINT32(0xFFFFFFFC, cpu_read_csr(&cpu, CSR_MTVAL));
+    TEST_ASSERT_EQUAL_UINT32(0, cpu_read_csr(&cpu, CSR_MEPC));
+    TEST_ASSERT_EQUAL_UINT32(0xDEADBEEF, cpu_read_reg(&cpu, 2)); // rd untouched
+    mem_free(&mem);
+}
+
+void test_load_halfword_fault_wrap(void) {
+    CPU cpu = {0};
+    Memory mem;
+    mem_init(&mem, 16);
+
+    cpu_write_csr(&cpu, CSR_MTVEC, 0x1000);
+    cpu_write_reg(&cpu, 2, 0xDEADBEEF);
+    mem_write32(&mem, 0, 0xFFE01103); // LH x2, -2(x0) -> addr 0xFFFFFFFE
+
+    uint32_t raw = mem_read32(&mem, cpu.pc);
+    DecodedInstruction instr = decode_instruction(raw);
+    execute(&cpu, &mem, &instr);
+
+    TEST_ASSERT_EQUAL_UINT32(0x1000, cpu.pc);
+    TEST_ASSERT_EQUAL_UINT32(5, cpu_read_csr(&cpu, CSR_MCAUSE));
+    TEST_ASSERT_EQUAL_UINT32(0xFFFFFFFE, cpu_read_csr(&cpu, CSR_MTVAL));
+    TEST_ASSERT_EQUAL_UINT32(0, cpu_read_csr(&cpu, CSR_MEPC));
+    TEST_ASSERT_EQUAL_UINT32(0xDEADBEEF, cpu_read_reg(&cpu, 2)); // rd untouched
+    mem_free(&mem);
+}
+
+void test_store_access_fault_wrap(void) {
+    CPU cpu = {0};
+    Memory mem;
+    mem_init(&mem, 16);
+
+    cpu_write_csr(&cpu, CSR_MTVEC, 0x1000);
+    cpu_write_reg(&cpu, 2, 0xDEADBEEF);
+    mem_write32(&mem, 0, 0xFE202E23); // SW x2, -4(x0) -> addr 0xFFFFFFFC
+
+    uint32_t raw = mem_read32(&mem, cpu.pc);
+    DecodedInstruction instr = decode_instruction(raw);
+    execute(&cpu, &mem, &instr);
+
+    TEST_ASSERT_EQUAL_UINT32(0x1000, cpu.pc);
+    TEST_ASSERT_EQUAL_UINT32(7, cpu_read_csr(&cpu, CSR_MCAUSE));
+    TEST_ASSERT_EQUAL_UINT32(0xFFFFFFFC, cpu_read_csr(&cpu, CSR_MTVAL));
+    TEST_ASSERT_EQUAL_UINT32(0, cpu_read_csr(&cpu, CSR_MEPC));
+    TEST_ASSERT_EQUAL_UINT32(0xFE202E23, mem_read32(&mem, 0)); // wrapped store didn't hit address 0
+    mem_free(&mem);
+}
+
+void test_store_halfword_fault_wrap(void) {
+    CPU cpu = {0};
+    Memory mem;
+    mem_init(&mem, 16);
+
+    cpu_write_csr(&cpu, CSR_MTVEC, 0x1000);
+    cpu_write_reg(&cpu, 2, 0xDEADBEEF);
+    mem_write32(&mem, 0, 0xFE201F23); // SH x2, -2(x0) -> addr 0xFFFFFFFE
+
+    uint32_t raw = mem_read32(&mem, cpu.pc);
+    DecodedInstruction instr = decode_instruction(raw);
+    execute(&cpu, &mem, &instr);
+
+    TEST_ASSERT_EQUAL_UINT32(0x1000, cpu.pc);
+    TEST_ASSERT_EQUAL_UINT32(7, cpu_read_csr(&cpu, CSR_MCAUSE));
+    TEST_ASSERT_EQUAL_UINT32(0xFFFFFFFE, cpu_read_csr(&cpu, CSR_MTVAL));
+    TEST_ASSERT_EQUAL_UINT32(0, cpu_read_csr(&cpu, CSR_MEPC));
+    TEST_ASSERT_EQUAL_UINT32(0xFE201F23, mem_read32(&mem, 0)); // wrapped store didn't hit address 0
+    mem_free(&mem);
+}
+
 void test_mret_returns_to_mepc(void) {
     CPU cpu = {0};
     Memory mem;
@@ -1250,6 +1336,10 @@ int main(void) {
     RUN_TEST(test_illegal_instruction_unknown_funct3);
     RUN_TEST(test_load_access_fault);
     RUN_TEST(test_store_access_fault);
+    RUN_TEST(test_load_access_fault_wrap);
+    RUN_TEST(test_load_halfword_fault_wrap);
+    RUN_TEST(test_store_access_fault_wrap);
+    RUN_TEST(test_store_halfword_fault_wrap);
     RUN_TEST(test_mret_returns_to_mepc);
     RUN_TEST(test_mret_restores_mie_from_mpie);
 	return UNITY_END();
