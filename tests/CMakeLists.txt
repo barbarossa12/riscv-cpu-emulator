@@ -44,6 +44,26 @@ set_tests_properties(test_mem_read8_oob PROPERTIES
     PASS_REGULAR_EXPRESSION "out-of-bound"
 )
 
+# Wraparound variants: the access starts near the top of the 32-bit address
+# space, so addr + N wraps to a small number. These must still hit the
+# out-of-bound abort, not slip past the check and segfault.
+foreach(wrap_test
+        test_mem_read16_wrap
+        test_mem_read32_wrap
+        test_mem_write16_wrap
+        test_mem_write32_wrap)
+    add_executable(${wrap_test} ${wrap_test}.c)
+    target_link_libraries(${wrap_test} PRIVATE riscv_core)
+
+    add_test(
+        NAME ${wrap_test}
+        COMMAND ${CMAKE_COMMAND} -E env $<TARGET_FILE:${wrap_test}>
+    )
+    set_tests_properties(${wrap_test} PROPERTIES
+        PASS_REGULAR_EXPRESSION "out-of-bound"
+    )
+endforeach()
+
 add_executable(test_cpu_reg_oob test_cpu_reg_oob.c)
 target_link_libraries(test_cpu_reg_oob PRIVATE riscv_core)
 
