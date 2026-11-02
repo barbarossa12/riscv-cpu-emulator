@@ -1434,6 +1434,189 @@ void test_trap_jumps_to_mtvec_base(void) {
     mem_free(&mem);
 }
 
+/* Illegal CSR access: traps with cause 2, mtval = the raw instruction, and neither
+ * rd nor the CSR is touched. The CSR is primed with 0x1234, x1 = x1_val, x2 is a sentinel. */
+static void assert_csr_access_illegal(uint32_t encoding, uint16_t csr, uint32_t x1_val) {
+    CPU cpu = {0};
+    Memory mem;
+    mem_init(&mem, 16);
+
+    cpu_write_csr(&cpu, CSR_MTVEC, 0x1000);
+    cpu_write_csr(&cpu, csr, 0x1234);
+    cpu_write_reg(&cpu, 1, x1_val);
+    cpu_write_reg(&cpu, 2, 0xDEADBEEF);
+    mem_write32(&mem, 0, encoding);
+
+    uint32_t raw = mem_read32(&mem, cpu.pc);
+    DecodedInstruction instr = decode_instruction(raw);
+    execute(&cpu, &mem, &instr);
+
+    TEST_ASSERT_EQUAL_UINT32(0x1000, cpu.pc);
+    TEST_ASSERT_EQUAL_UINT32(2, cpu_read_csr(&cpu, CSR_MCAUSE));
+    TEST_ASSERT_EQUAL_UINT32(encoding, cpu_read_csr(&cpu, CSR_MTVAL));
+    TEST_ASSERT_EQUAL_UINT32(0, cpu_read_csr(&cpu, CSR_MEPC));
+    TEST_ASSERT_EQUAL_UINT32(0xDEADBEEF, cpu_read_reg(&cpu, 2)); // rd untouched
+    TEST_ASSERT_EQUAL_UINT32(0x1234, cpu_read_csr(&cpu, csr));   // CSR untouched
+    mem_free(&mem);
+}
+
+/* Legal CSR read with no write: runs normally, rd gets the CSR value, CSR is unchanged. */
+static void assert_csr_read_ok(uint32_t encoding, uint16_t csr) {
+    CPU cpu = {0};
+    Memory mem;
+    mem_init(&mem, 16);
+
+    cpu_write_csr(&cpu, CSR_MCAUSE, 0x77); // marker: no trap must overwrite it
+    cpu_write_csr(&cpu, csr, 0x1234);
+    cpu_write_reg(&cpu, 2, 0xDEADBEEF);
+    mem_write32(&mem, 0, encoding);
+
+    uint32_t raw = mem_read32(&mem, cpu.pc);
+    DecodedInstruction instr = decode_instruction(raw);
+    execute(&cpu, &mem, &instr);
+
+    TEST_ASSERT_EQUAL_UINT32(4, cpu.pc);
+    TEST_ASSERT_EQUAL_UINT32(0x77, cpu_read_csr(&cpu, CSR_MCAUSE));
+    TEST_ASSERT_EQUAL_UINT32(0x1234, cpu_read_reg(&cpu, 2));
+    TEST_ASSERT_EQUAL_UINT32(0x1234, cpu_read_csr(&cpu, csr));
+    mem_free(&mem);
+}
+
+/* Read-only CSR addresses (csr[11:10] == 0b11), here 0xC00 (cycle) */
+void test_csrrw_read_only_csr_traps(void) {
+    assert_csr_access_illegal(0xC0009073, 0xC00, 7); // CSRRW x0, cycle, x1
+}
+
+void test_csrrw_rs1_x0_read_only_csr_traps(void) {
+    assert_csr_access_illegal(0xC0001173, 0xC00, 0); // CSRRW x2, cycle, x0: writes zero
+}
+
+void test_csrrs_read_only_csr_traps(void) {
+    assert_csr_access_illegal(0xC000A173, 0xC00, 7); // CSRRS x2, cycle, x1
+}
+
+void test_csrrs_read_only_csr_traps_when_rs1_holds_zero(void) {
+    assert_csr_access_illegal(0xC000A173, 0xC00, 0); // CSRRS x2, cycle, x1 with x1 = 0: rs1 != x0
+}
+
+void test_csrrc_read_only_csr_traps(void) {
+    assert_csr_access_illegal(0xC000B173, 0xC00, 7); // CSRRC x2, cycle, x1
+}
+
+void test_csrrwi_read_only_csr_traps(void) {
+    assert_csr_access_illegal(0xC0005173, 0xC00, 0); // CSRRWI x2, cycle, 0: always writes
+}
+
+void test_csrrsi_read_only_csr_traps(void) {
+    assert_csr_access_illegal(0xC000E173, 0xC00, 0); // CSRRSI x2, cycle, 1
+}
+
+void test_csrrci_read_only_csr_traps(void) {
+    assert_csr_access_illegal(0xC000F173, 0xC00, 0); // CSRRCI x2, cycle, 1
+}
+
+void test_csrrw_mhartid_traps(void) {
+    assert_csr_access_illegal(0xF1409073, 0xF14, 7); // CSRRW x0, mhartid, x1
+}
+
+void test_csrrw_top_of_csr_space_traps(void) {
+    assert_csr_access_illegal(0xFFF09073, 0xFFF, 7); // CSRRW x0, 0xFFF, x1
+}
+
+/* rs1 = x0 / uimm = 0 never writes, so reading a read-only CSR is legal */
+void test_csrr_read_only_csr_does_not_trap(void) {
+    assert_csr_read_ok(0xC0002173, 0xC00); // CSRRS x2, cycle, x0 (csrr)
+}
+
+void test_csrrsi_uimm0_read_only_csr_does_not_trap(void) {
+    assert_csr_read_ok(0xC0006173, 0xC00); // CSRRSI x2, cycle, 0
+}
+
+void test_csrrci_uimm0_read_only_csr_does_not_trap(void) {
+    assert_csr_read_ok(0xC0007173, 0xC00); // CSRRCI x2, cycle, 0
+}
+
+void test_csrr_mhartid_does_not_trap(void) {
+    assert_csr_read_ok(0xF1402173, 0xF14); // CSRRS x2, mhartid, x0
+}
+
+/* 0xBFF has csr[11:10] == 0b10 (read/write), the last address before the read-only range */
+void test_csrrw_last_writable_csr_below_read_only_range(void) {
+    CPU cpu = {0};
+    Memory mem;
+    mem_init(&mem, 16);
+
+    cpu_write_csr(&cpu, CSR_MCAUSE, 0x77); // marker: no trap must overwrite it
+    cpu_write_reg(&cpu, 1, 7);
+    mem_write32(&mem, 0, 0xBFF09073); // CSRRW x0, 0xBFF, x1
+
+    uint32_t raw = mem_read32(&mem, cpu.pc);
+    DecodedInstruction instr = decode_instruction(raw);
+    execute(&cpu, &mem, &instr);
+
+    TEST_ASSERT_EQUAL_UINT32(4, cpu.pc);
+    TEST_ASSERT_EQUAL_UINT32(7, cpu_read_csr(&cpu, 0xBFF));
+    TEST_ASSERT_EQUAL_UINT32(0x77, cpu_read_csr(&cpu, CSR_MCAUSE));
+    mem_free(&mem);
+}
+
+/* rs1 = x0 / uimm = 0 must not write the CSR back at all. mtvec's raw storage is set to
+ * 0x1003 directly (bypassing the WARL accessor), so a write-back would show up as 0x1000. */
+static void assert_csr_no_write_back(uint32_t encoding) {
+    CPU cpu = {0};
+    Memory mem;
+    mem_init(&mem, 16);
+
+    cpu.csr[CSR_MTVEC] = 0x1003;
+    mem_write32(&mem, 0, encoding);
+
+    uint32_t raw = mem_read32(&mem, cpu.pc);
+    DecodedInstruction instr = decode_instruction(raw);
+    execute(&cpu, &mem, &instr);
+
+    TEST_ASSERT_EQUAL_UINT32(4, cpu.pc);
+    TEST_ASSERT_EQUAL_UINT32(0x1003, cpu_read_reg(&cpu, 2));    // read the old value
+    TEST_ASSERT_EQUAL_UINT32(0x1003, cpu.csr[CSR_MTVEC]);       // and did not write it back
+    mem_free(&mem);
+}
+
+void test_csrrs_rs1_x0_does_not_write(void) {
+    assert_csr_no_write_back(0x30502173); // CSRRS x2, mtvec, x0
+}
+
+void test_csrrc_rs1_x0_does_not_write(void) {
+    assert_csr_no_write_back(0x30503173); // CSRRC x2, mtvec, x0
+}
+
+void test_csrrsi_uimm0_does_not_write(void) {
+    assert_csr_no_write_back(0x30506173); // CSRRSI x2, mtvec, 0
+}
+
+void test_csrrci_uimm0_does_not_write(void) {
+    assert_csr_no_write_back(0x30507173); // CSRRCI x2, mtvec, 0
+}
+
+/* 0x7B0-0x7BF are debug-mode-only: any M-mode access traps, reads included */
+void test_debug_csr_read_traps(void) {
+    assert_csr_access_illegal(0x7B002173, 0x7B0, 0); // CSRRS x2, 0x7B0, x0 (csrr): read only, still illegal
+}
+
+void test_debug_csr_write_traps(void) {
+    assert_csr_access_illegal(0x7B009073, 0x7B0, 7); // CSRRW x0, 0x7B0, x1
+}
+
+void test_debug_csr_range_upper_bound_traps(void) {
+    assert_csr_access_illegal(0x7BF09073, 0x7BF, 7); // CSRRW x0, 0x7BF, x1
+}
+
+void test_csr_just_below_debug_range_is_accessible(void) {
+    assert_csr_read_ok(0x7AF02173, 0x7AF); // CSRRS x2, 0x7AF, x0
+}
+
+void test_csr_just_above_debug_range_is_accessible(void) {
+    assert_csr_read_ok(0x7C002173, 0x7C0); // CSRRS x2, 0x7C0, x0
+}
+
 void test_mret_returns_to_mepc(void) {
     CPU cpu = {0};
     Memory mem;
@@ -1556,6 +1739,30 @@ int main(void) {
     RUN_TEST(test_csrrw_mtvec_clears_mode_bits);
     RUN_TEST(test_csrrwi_mtvec_clears_mode_bits);
     RUN_TEST(test_trap_jumps_to_mtvec_base);
+    RUN_TEST(test_csrrw_read_only_csr_traps);
+    RUN_TEST(test_csrrw_rs1_x0_read_only_csr_traps);
+    RUN_TEST(test_csrrs_read_only_csr_traps);
+    RUN_TEST(test_csrrs_read_only_csr_traps_when_rs1_holds_zero);
+    RUN_TEST(test_csrrc_read_only_csr_traps);
+    RUN_TEST(test_csrrwi_read_only_csr_traps);
+    RUN_TEST(test_csrrsi_read_only_csr_traps);
+    RUN_TEST(test_csrrci_read_only_csr_traps);
+    RUN_TEST(test_csrrw_mhartid_traps);
+    RUN_TEST(test_csrrw_top_of_csr_space_traps);
+    RUN_TEST(test_csrr_read_only_csr_does_not_trap);
+    RUN_TEST(test_csrrsi_uimm0_read_only_csr_does_not_trap);
+    RUN_TEST(test_csrrci_uimm0_read_only_csr_does_not_trap);
+    RUN_TEST(test_csrr_mhartid_does_not_trap);
+    RUN_TEST(test_csrrw_last_writable_csr_below_read_only_range);
+    RUN_TEST(test_csrrs_rs1_x0_does_not_write);
+    RUN_TEST(test_csrrc_rs1_x0_does_not_write);
+    RUN_TEST(test_csrrsi_uimm0_does_not_write);
+    RUN_TEST(test_csrrci_uimm0_does_not_write);
+    RUN_TEST(test_debug_csr_read_traps);
+    RUN_TEST(test_debug_csr_write_traps);
+    RUN_TEST(test_debug_csr_range_upper_bound_traps);
+    RUN_TEST(test_csr_just_below_debug_range_is_accessible);
+    RUN_TEST(test_csr_just_above_debug_range_is_accessible);
     RUN_TEST(test_mret_returns_to_mepc);
     RUN_TEST(test_mret_restores_mie_from_mpie);
 	return UNITY_END();
