@@ -55,6 +55,22 @@ void test_cpu_csr_writes_are_independent(void) {
 	TEST_ASSERT_EQUAL_UINT32(0xBBBB, cpu_read_csr(&test_cpu, CSR_MCAUSE));
 }
 
+void test_cpu_mtvec_mode_bits_read_as_zero(void) {
+	CPU test_cpu = {0};
+	cpu_write_csr(&test_cpu, CSR_MTVEC, 0x1001); // Vectored: not supported yet
+	TEST_ASSERT_EQUAL_UINT32(0x1000, cpu_read_csr(&test_cpu, CSR_MTVEC));
+	cpu_write_csr(&test_cpu, CSR_MTVEC, 0x1002); // Reserved
+	TEST_ASSERT_EQUAL_UINT32(0x1000, cpu_read_csr(&test_cpu, CSR_MTVEC));
+	cpu_write_csr(&test_cpu, CSR_MTVEC, 0x1003); // Reserved
+	TEST_ASSERT_EQUAL_UINT32(0x1000, cpu_read_csr(&test_cpu, CSR_MTVEC));
+}
+
+void test_cpu_other_csrs_keep_low_bits(void) {
+	CPU test_cpu = {0};
+	cpu_write_csr(&test_cpu, CSR_MSCRATCH, 0x1003);
+	TEST_ASSERT_EQUAL_UINT32(0x1003, cpu_read_csr(&test_cpu, CSR_MSCRATCH));
+}
+
 int main(void) {
 	UNITY_BEGIN();
 	RUN_TEST(test_cpu_write_read_roundtrip_x5);
@@ -64,6 +80,8 @@ int main(void) {
 	RUN_TEST(test_cpu_write_to_x0_does_not_affect_other_registers);
 	RUN_TEST(test_cpu_csr_write_read_roundtrip);
 	RUN_TEST(test_cpu_csr_writes_are_independent);
+	RUN_TEST(test_cpu_mtvec_mode_bits_read_as_zero);
+	RUN_TEST(test_cpu_other_csrs_keep_low_bits);
 	return UNITY_END();
 }
 

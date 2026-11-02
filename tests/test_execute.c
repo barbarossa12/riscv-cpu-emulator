@@ -1380,6 +1380,60 @@ void test_branch_not_taken_misaligned_target_no_trap(void) {
     mem_free(&mem);
 }
 
+void test_csrrw_mtvec_clears_mode_bits(void) {
+    CPU cpu = {0};
+    Memory mem;
+    mem_init(&mem, 16);
+
+    cpu_write_reg(&cpu, 1, 0x1001);
+    mem_write32(&mem, 0, 0x30509073); // CSRRW x0, mtvec, x1
+
+    uint32_t raw = mem_read32(&mem, cpu.pc);
+    DecodedInstruction instr = decode_instruction(raw);
+    execute(&cpu, &mem, &instr);
+
+    TEST_ASSERT_EQUAL_UINT32(0x1000, cpu_read_csr(&cpu, CSR_MTVEC));
+    TEST_ASSERT_EQUAL_UINT32(4, cpu.pc);
+    mem_free(&mem);
+}
+
+void test_csrrwi_mtvec_clears_mode_bits(void) {
+    CPU cpu = {0};
+    Memory mem;
+    mem_init(&mem, 16);
+
+    cpu_write_csr(&cpu, CSR_MTVEC, 0x2000);
+    mem_write32(&mem, 0, 0x3051D073); // CSRRWI x0, mtvec, 3
+
+    uint32_t raw = mem_read32(&mem, cpu.pc);
+    DecodedInstruction instr = decode_instruction(raw);
+    execute(&cpu, &mem, &instr);
+
+    TEST_ASSERT_EQUAL_UINT32(0, cpu_read_csr(&cpu, CSR_MTVEC));
+    mem_free(&mem);
+}
+
+void test_trap_jumps_to_mtvec_base(void) {
+    CPU cpu = {0};
+    Memory mem;
+    mem_init(&mem, 16);
+
+    cpu_write_reg(&cpu, 1, 0x1001);
+    mem_write32(&mem, 0, 0x30509073); // CSRRW x0, mtvec, x1
+    mem_write32(&mem, 4, 0x00000073); // ECALL
+
+    for (int i = 0; i < 2; i++) {
+        uint32_t raw = mem_read32(&mem, cpu.pc);
+        DecodedInstruction instr = decode_instruction(raw);
+        execute(&cpu, &mem, &instr);
+    }
+
+    TEST_ASSERT_EQUAL_UINT32(0x1000, cpu.pc);
+    TEST_ASSERT_EQUAL_UINT32(4, cpu_read_csr(&cpu, CSR_MEPC));
+    TEST_ASSERT_EQUAL_UINT32(11, cpu_read_csr(&cpu, CSR_MCAUSE));
+    mem_free(&mem);
+}
+
 void test_mret_returns_to_mepc(void) {
     CPU cpu = {0};
     Memory mem;
@@ -1499,6 +1553,9 @@ int main(void) {
     RUN_TEST(test_bltu_misaligned_target);
     RUN_TEST(test_bgeu_misaligned_target);
     RUN_TEST(test_branch_not_taken_misaligned_target_no_trap);
+    RUN_TEST(test_csrrw_mtvec_clears_mode_bits);
+    RUN_TEST(test_csrrwi_mtvec_clears_mode_bits);
+    RUN_TEST(test_trap_jumps_to_mtvec_base);
     RUN_TEST(test_mret_returns_to_mepc);
     RUN_TEST(test_mret_restores_mie_from_mpie);
 	return UNITY_END();
