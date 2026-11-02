@@ -17,16 +17,22 @@ void mem_free(Memory *mem) {
 	LOG_DEBUG("Memory freed!");
 }
 
+/* True if all n bytes starting at addr lie inside the buffer.
+ * The sum is done in 64 bits so addr + n can't wrap around 2^32. */
+static bool mem_in_bounds(const Memory *mem, uint32_t addr, uint32_t n) {
+	return (uint64_t)addr + n <= mem->size;
+}
+
 /*memory read functions*/
 uint8_t mem_read8(Memory *mem, uint32_t addr) {
-	if(addr >= mem->size) {
+	if(!mem_in_bounds(mem, addr, 1)) {
 		LOG_FATAL("out-of-bound read at address 0x%08x (buffer size %zu)", addr, mem->size);
 	}
 	return mem->buffer[addr];
 }
 
 uint16_t mem_read16(Memory *mem, uint32_t addr) {
-	if(addr + 1 >= mem->size) {
+	if(!mem_in_bounds(mem, addr, 2)) {
 		LOG_FATAL("out-of-bound read at address 0x%08x (buffer size %zu)", addr, mem->size);
 	}
 	uint16_t result = (mem->buffer[addr+1] << 8);
@@ -35,7 +41,7 @@ uint16_t mem_read16(Memory *mem, uint32_t addr) {
 }
 
 uint32_t mem_read32(Memory *mem, uint32_t addr) {
-	if(addr + 3 >= mem->size) {
+	if(!mem_in_bounds(mem, addr, 4)) {
 		LOG_FATAL("out-of-bound read at address 0x%08x (buffer size %zu)", addr, mem->size);
 	}
 	uint32_t result = (mem->buffer[addr + 3]) << 24;
@@ -47,14 +53,14 @@ uint32_t mem_read32(Memory *mem, uint32_t addr) {
 
 /*memory write functions*/
 void mem_write8(Memory *mem, uint32_t addr, uint8_t val) {
-	if(addr >= mem->size) {
+	if(!mem_in_bounds(mem, addr, 1)) {
 		LOG_FATAL("out-of-bound write at address 0x%08x (buffer size %zu)", addr, mem->size);
 	}
 	mem->buffer[addr] = val;
 }
 
 void mem_write16(Memory *mem, uint32_t addr, uint16_t val) {
-	if(addr + 1 >= mem->size) {
+	if(!mem_in_bounds(mem, addr, 2)) {
 		LOG_FATAL("out-of-bound write at address 0x%08x (buffer size %zu)", addr, mem->size);
 	}
 	mem->buffer[addr] = val & 0xFF;
@@ -62,7 +68,7 @@ void mem_write16(Memory *mem, uint32_t addr, uint16_t val) {
 }
 
 void mem_write32(Memory *mem, uint32_t addr, uint32_t val) {
-	if(addr + 3 >=  mem->size) {
+	if(!mem_in_bounds(mem, addr, 4)) {
 		LOG_FATAL("out-of-bound write at address 0x%08x (buffer size %zu)", addr, mem->size);
 	}
 	mem->buffer[addr] = val & 0xFF;
@@ -72,7 +78,7 @@ void mem_write32(Memory *mem, uint32_t addr, uint32_t val) {
 }
 
 bool mem_try_read8(Memory *mem, uint32_t addr, uint8_t *out) {
-    if (addr >= mem->size) {
+    if (!mem_in_bounds(mem, addr, 1)) {
         return false;
     }
     *out = mem->buffer[addr];
@@ -80,7 +86,7 @@ bool mem_try_read8(Memory *mem, uint32_t addr, uint8_t *out) {
 }
 
 bool mem_try_write8(Memory *mem, uint32_t addr, uint8_t val) {
-    if (addr >= mem->size) {
+    if (!mem_in_bounds(mem, addr, 1)) {
         return false;
     }
     mem->buffer[addr] = val;
@@ -88,7 +94,7 @@ bool mem_try_write8(Memory *mem, uint32_t addr, uint8_t val) {
 }
 
 bool mem_try_read16(Memory *mem, uint32_t addr, uint16_t *out) {
-    if (addr + 2 > mem->size) {
+    if (!mem_in_bounds(mem, addr, 2)) {
         return false;
     }
     *out = (uint16_t)(mem->buffer[addr] |
@@ -97,7 +103,7 @@ bool mem_try_read16(Memory *mem, uint32_t addr, uint16_t *out) {
 }
 
 bool mem_try_read32(Memory *mem, uint32_t addr, uint32_t *out) {
-    if (addr + 4 > mem->size) {
+    if (!mem_in_bounds(mem, addr, 4)) {
         return false;
     }
     *out = (uint32_t)mem->buffer[addr] |
@@ -108,7 +114,7 @@ bool mem_try_read32(Memory *mem, uint32_t addr, uint32_t *out) {
 }
 
 bool mem_try_write16(Memory *mem, uint32_t addr, uint16_t val) {
-    if (addr + 2 > mem->size) {
+    if (!mem_in_bounds(mem, addr, 2)) {
         return false;
     }
     mem->buffer[addr]     = (uint8_t)(val & 0xFF);
@@ -117,7 +123,7 @@ bool mem_try_write16(Memory *mem, uint32_t addr, uint16_t val) {
 }
 
 bool mem_try_write32(Memory *mem, uint32_t addr, uint32_t val) {
-    if (addr + 4 > mem->size) {
+    if (!mem_in_bounds(mem, addr, 4)) {
         return false;
     }
     mem->buffer[addr]     = (uint8_t)(val & 0xFF);
