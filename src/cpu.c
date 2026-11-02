@@ -38,5 +38,9 @@ void cpu_write_csr(CPU *cpu, uint16_t addr, uint32_t value) {
 	if(addr > 0xFFF) {
 		LOG_FATAL("CPU CSR register value larger than 0xFFF: 0x%x", addr);
 	}
-	cpu->csr[addr] = value;	
+	if(addr == CSR_MTVEC) {
+		// MODE is WARL: only Direct (0) is supported, so MODE reads back as 0
+		value &= ~0x3u;
+	}
+	cpu->csr[addr] = value;
 }
