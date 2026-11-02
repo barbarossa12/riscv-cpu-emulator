@@ -1237,6 +1237,51 @@ void test_store_halfword_fault_wrap(void) {
     mem_free(&mem);
 }
 
+/* Reserved funct7 values on OP / OP-IMM shifts must trap as illegal instructions
+ * instead of silently executing as a neighbouring instruction. */
+static void assert_illegal_instruction(uint32_t encoding) {
+    CPU cpu = {0};
+    Memory mem;
+    mem_init(&mem, 16);
+
+    cpu_write_csr(&cpu, CSR_MTVEC, 0x1000);
+    cpu_write_reg(&cpu, 1, 7);
+    cpu_write_reg(&cpu, 2, 3);
+    cpu_write_reg(&cpu, 3, 0xDEADBEEF);
+    mem_write32(&mem, 0, encoding);
+
+    uint32_t raw = mem_read32(&mem, cpu.pc);
+    DecodedInstruction instr = decode_instruction(raw);
+    execute(&cpu, &mem, &instr);
+
+    TEST_ASSERT_EQUAL_UINT32(0x1000, cpu.pc);
+    TEST_ASSERT_EQUAL_UINT32(2, cpu_read_csr(&cpu, CSR_MCAUSE));
+    TEST_ASSERT_EQUAL_UINT32(encoding, cpu_read_csr(&cpu, CSR_MTVAL));
+    TEST_ASSERT_EQUAL_UINT32(0, cpu_read_csr(&cpu, CSR_MEPC));
+    TEST_ASSERT_EQUAL_UINT32(0xDEADBEEF, cpu_read_reg(&cpu, 3)); // rd untouched
+    mem_free(&mem);
+}
+
+void test_illegal_op_funct7_in_add_slot(void) {
+    assert_illegal_instruction(0x022081B3); // MUL x3, x1, x2: funct7=0x01, funct3=0
+}
+
+void test_illegal_op_funct7_in_sll_slot(void) {
+    assert_illegal_instruction(0x020091B3); // MULH x3, x1, x2: funct7=0x01, funct3=1
+}
+
+void test_illegal_op_alt_funct7_in_slt_slot(void) {
+    assert_illegal_instruction(0x4020A1B3); // funct7=0x20, funct3=2: only SUB/SRA may use 0x20
+}
+
+void test_illegal_slli_nonzero_funct7(void) {
+    assert_illegal_instruction(0x02209193); // SLLI x3, x1, 2 with funct7=0x01 (shamt[5]=1)
+}
+
+void test_illegal_srli_unknown_funct7(void) {
+    assert_illegal_instruction(0x0220D193); // SRLI x3, x1, 2 with funct7=0x01
+}
+
 void test_mret_returns_to_mepc(void) {
     CPU cpu = {0};
     Memory mem;
@@ -1340,6 +1385,11 @@ int main(void) {
     RUN_TEST(test_load_halfword_fault_wrap);
     RUN_TEST(test_store_access_fault_wrap);
     RUN_TEST(test_store_halfword_fault_wrap);
+    RUN_TEST(test_illegal_op_funct7_in_add_slot);
+    RUN_TEST(test_illegal_op_funct7_in_sll_slot);
+    RUN_TEST(test_illegal_op_alt_funct7_in_slt_slot);
+    RUN_TEST(test_illegal_slli_nonzero_funct7);
+    RUN_TEST(test_illegal_srli_unknown_funct7);
     RUN_TEST(test_mret_returns_to_mepc);
     RUN_TEST(test_mret_restores_mie_from_mpie);
 	return UNITY_END();
