@@ -14,6 +14,9 @@ static uint32_t execute_fence(CPU *cpu, Memory *mem, DecodedInstruction *instr, 
 static uint32_t execute_system(CPU *cpu, Memory *mem, DecodedInstruction *instr, uint32_t pc);
 static uint32_t trap_enter(CPU *cpu, uint32_t pc, uint32_t cause, uint32_t tval);
 static bool target_misaligned(uint32_t target);
+static bool csr_is_read_only(uint16_t csr_addr);
+static bool csr_is_debug_only(uint16_t csr_addr);
+static bool csr_instr_writes(DecodedInstruction *instr);
 static uint32_t take_branch(CPU *cpu, uint32_t pc, DecodedInstruction *instr);
 
 
@@ -392,6 +395,13 @@ static uint32_t execute_fence(CPU *cpu, Memory *mem, DecodedInstruction *instr, 
 static uint32_t execute_system(CPU *cpu, Memory *mem, DecodedInstruction *instr, uint32_t pc) {
     (void)mem;
     uint16_t csr_addr = (uint16_t)(instr->imm & 0xFFF);
+    // funct3 == 0 is ECALL/EBREAK/MRET, whose imm field is not a CSR address
+    if (instr->funct3 != 0 && csr_is_debug_only(csr_addr)) {
+        return trap_enter(cpu, pc, 2, instr->raw); // debug-mode-only CSR: illegal instruction
+    }
+    if (csr_is_read_only(csr_addr) && csr_instr_writes(instr)) {
+        return trap_enter(cpu, pc, 2, instr->raw); // write to a read-only CSR: illegal instruction
+    }
     switch (instr->funct3) {
         case 0x0:
             if(instr->imm == 0) { // ECALL
@@ -423,7 +433,9 @@ static uint32_t execute_system(CPU *cpu, Memory *mem, DecodedInstruction *instr,
         {
             uint32_t rs1_val = cpu_read_reg(cpu, instr->rs1);
             uint32_t old = cpu_read_csr(cpu, csr_addr);
-            cpu_write_csr(cpu, csr_addr, old | rs1_val);
+            if (instr->rs1 != 0) { // rs1 = x0: no write at all
+                cpu_write_csr(cpu, csr_addr, old | rs1_val);
+            }
             cpu_write_reg(cpu, instr->rd, old);
             return pc + 4;
         }
@@ -431,7 +443,9 @@ static uint32_t execute_system(CPU *cpu, Memory *mem, DecodedInstruction *instr,
         {
             uint32_t rs1_val = cpu_read_reg(cpu, instr->rs1);
             uint32_t old = cpu_read_csr(cpu, csr_addr);
-            cpu_write_csr(cpu, csr_addr, old & ~rs1_val);
+            if (instr->rs1 != 0) { // rs1 = x0: no write at all
+                cpu_write_csr(cpu, csr_addr, old & ~rs1_val);
+            }
             cpu_write_reg(cpu, instr->rd, old);
             return pc + 4;
         }
@@ -445,14 +459,18 @@ static uint32_t execute_system(CPU *cpu, Memory *mem, DecodedInstruction *instr,
         case 0x6: // CSRRSI
         {
             uint32_t old = cpu_read_csr(cpu, csr_addr);
-            cpu_write_csr(cpu, csr_addr, old | (uint32_t)instr->rs1);
+            if (instr->rs1 != 0) { // uimm = 0: no write at all
+                cpu_write_csr(cpu, csr_addr, old | (uint32_t)instr->rs1);
+            }
             cpu_write_reg(cpu, instr->rd, old);
             return pc + 4;
         }
         case 0x7: // CSRRCI
         {
             uint32_t old = cpu_read_csr(cpu, csr_addr);
-            cpu_write_csr(cpu, csr_addr, old & ~(uint32_t)instr->rs1);
+            if (instr->rs1 != 0) { // uimm = 0: no write at all
+                cpu_write_csr(cpu, csr_addr, old & ~(uint32_t)instr->rs1);
+            }
             cpu_write_reg(cpu, instr->rd, old);
             return pc + 4;
         }
@@ -460,6 +478,33 @@ static uint32_t execute_system(CPU *cpu, Memory *mem, DecodedInstruction *instr,
             return trap_enter(cpu, pc, 2, instr->raw); // illegal instruction
     }
     return pc + 4;
+}
+
+// csr[11:10] == 0b11 marks a read-only CSR address
+static bool csr_is_read_only(uint16_t csr_addr) {
+    return ((csr_addr >> 10) & 0x3) == 0x3;
+}
+
+// 0x7B0-0x7BF are only visible to debug mode, so any M-mode access is illegal
+static bool csr_is_debug_only(uint16_t csr_addr) {
+    return csr_addr >= 0x7B0 && csr_addr <= 0x7BF;
+}
+
+// Whether a Zicsr instruction writes the CSR. CSRRW/CSRRWI always do; the
+// set/clear forms only do when rs1 (register or uimm) is non-zero.
+static bool csr_instr_writes(DecodedInstruction *instr) {
+    switch (instr->funct3) {
+        case 0x1: // CSRRW
+        case 0x5: // CSRRWI
+            return true;
+        case 0x2: // CSRRS
+        case 0x3: // CSRRC
+        case 0x6: // CSRRSI
+        case 0x7: // CSRRCI
+            return instr->rs1 != 0;
+        default:
+            return false;
+    }
 }
 
 // IALIGN=32: a taken branch/jump target must be 4-byte aligned
