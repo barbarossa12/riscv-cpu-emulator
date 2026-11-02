@@ -1282,6 +1282,104 @@ void test_illegal_srli_unknown_funct7(void) {
     assert_illegal_instruction(0x0220D193); // SRLI x3, x1, 2 with funct7=0x01
 }
 
+/* IALIGN=32: a taken jump/branch to a target that isn't 4-byte aligned traps with
+ * cause 0, mtval = the target, mepc = the jump itself, and rd is not written. */
+static void assert_misaligned_jump_trap(uint32_t encoding, uint32_t x1, uint32_t x2, uint32_t expected_target) {
+    CPU cpu = {0};
+    Memory mem;
+    mem_init(&mem, 16);
+
+    cpu_write_csr(&cpu, CSR_MTVEC, 0x1000);
+    cpu_write_csr(&cpu, CSR_MCAUSE, 0x77); // marker: cause 0 must be written by the trap
+    cpu_write_reg(&cpu, 1, x1);
+    cpu_write_reg(&cpu, 2, x2);
+    mem_write32(&mem, 0, encoding);
+
+    uint32_t raw = mem_read32(&mem, cpu.pc);
+    DecodedInstruction instr = decode_instruction(raw);
+    execute(&cpu, &mem, &instr);
+
+    TEST_ASSERT_EQUAL_UINT32(0x1000, cpu.pc);
+    TEST_ASSERT_EQUAL_UINT32(0, cpu_read_csr(&cpu, CSR_MCAUSE));
+    TEST_ASSERT_EQUAL_UINT32(expected_target, cpu_read_csr(&cpu, CSR_MTVAL));
+    TEST_ASSERT_EQUAL_UINT32(0, cpu_read_csr(&cpu, CSR_MEPC));
+    TEST_ASSERT_EQUAL_UINT32(x1, cpu_read_reg(&cpu, 1)); // return address / x1 untouched
+    mem_free(&mem);
+}
+
+void test_jal_misaligned_target(void) {
+    assert_misaligned_jump_trap(0x002000EF, 0xDEADBEEF, 0, 2); // JAL x1, +2
+}
+
+void test_jalr_misaligned_target(void) {
+    assert_misaligned_jump_trap(0x002100E7, 0xDEADBEEF, 0x100, 0x102); // JALR x1, 2(x2)
+}
+
+void test_jalr_misaligned_target_after_clearing_bit0(void) {
+    // 0x100 + 3 = 0x103, bit 0 is cleared to 0x102, which is still misaligned
+    assert_misaligned_jump_trap(0x003100E7, 0xDEADBEEF, 0x100, 0x102); // JALR x1, 3(x2)
+}
+
+void test_jalr_ignores_target_bit0(void) {
+    CPU cpu = {0};
+    Memory mem;
+    mem_init(&mem, 16);
+
+    cpu_write_csr(&cpu, CSR_MCAUSE, 0x77); // marker: no trap must overwrite it
+    cpu_write_reg(&cpu, 2, 0x100);
+    mem_write32(&mem, 0, 0x001100E7); // JALR x1, 1(x2) -> 0x101 & ~1 = 0x100
+
+    uint32_t raw = mem_read32(&mem, cpu.pc);
+    DecodedInstruction instr = decode_instruction(raw);
+    execute(&cpu, &mem, &instr);
+
+    TEST_ASSERT_EQUAL_UINT32(0x100, cpu.pc);
+    TEST_ASSERT_EQUAL_UINT32(4, cpu_read_reg(&cpu, 1));
+    TEST_ASSERT_EQUAL_UINT32(0x77, cpu_read_csr(&cpu, CSR_MCAUSE));
+    mem_free(&mem);
+}
+
+void test_beq_misaligned_target(void) {
+    assert_misaligned_jump_trap(0x00208163, 5, 5, 2); // BEQ x1, x2, +2, taken
+}
+
+void test_bne_misaligned_target(void) {
+    assert_misaligned_jump_trap(0x00209163, 5, 6, 2); // BNE x1, x2, +2, taken
+}
+
+void test_blt_misaligned_target(void) {
+    assert_misaligned_jump_trap(0x0020C163, 1, 2, 2); // BLT x1, x2, +2, taken
+}
+
+void test_bge_misaligned_target(void) {
+    assert_misaligned_jump_trap(0x0020D163, 2, 1, 2); // BGE x1, x2, +2, taken
+}
+
+void test_bltu_misaligned_target(void) {
+    assert_misaligned_jump_trap(0x0020E163, 1, 2, 2); // BLTU x1, x2, +2, taken
+}
+
+void test_bgeu_misaligned_target(void) {
+    assert_misaligned_jump_trap(0x0020F163, 2, 1, 2); // BGEU x1, x2, +2, taken
+}
+
+void test_branch_not_taken_misaligned_target_no_trap(void) {
+    CPU cpu = {0};
+    Memory mem;
+    mem_init(&mem, 16);
+
+    cpu_write_csr(&cpu, CSR_MCAUSE, 0x77); // marker: no trap must overwrite it
+    mem_write32(&mem, 0, 0x00001163); // BNE x0, x0, +2: never taken
+
+    uint32_t raw = mem_read32(&mem, cpu.pc);
+    DecodedInstruction instr = decode_instruction(raw);
+    execute(&cpu, &mem, &instr);
+
+    TEST_ASSERT_EQUAL_UINT32(4, cpu.pc);
+    TEST_ASSERT_EQUAL_UINT32(0x77, cpu_read_csr(&cpu, CSR_MCAUSE));
+    mem_free(&mem);
+}
+
 void test_mret_returns_to_mepc(void) {
     CPU cpu = {0};
     Memory mem;
@@ -1390,6 +1488,17 @@ int main(void) {
     RUN_TEST(test_illegal_op_alt_funct7_in_slt_slot);
     RUN_TEST(test_illegal_slli_nonzero_funct7);
     RUN_TEST(test_illegal_srli_unknown_funct7);
+    RUN_TEST(test_jal_misaligned_target);
+    RUN_TEST(test_jalr_misaligned_target);
+    RUN_TEST(test_jalr_misaligned_target_after_clearing_bit0);
+    RUN_TEST(test_jalr_ignores_target_bit0);
+    RUN_TEST(test_beq_misaligned_target);
+    RUN_TEST(test_bne_misaligned_target);
+    RUN_TEST(test_blt_misaligned_target);
+    RUN_TEST(test_bge_misaligned_target);
+    RUN_TEST(test_bltu_misaligned_target);
+    RUN_TEST(test_bgeu_misaligned_target);
+    RUN_TEST(test_branch_not_taken_misaligned_target_no_trap);
     RUN_TEST(test_mret_returns_to_mepc);
     RUN_TEST(test_mret_restores_mie_from_mpie);
 	return UNITY_END();
