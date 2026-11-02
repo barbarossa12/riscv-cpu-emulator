@@ -44,10 +44,10 @@ uint32_t mem_read32(Memory *mem, uint32_t addr) {
 	if(!mem_in_bounds(mem, addr, 4)) {
 		LOG_FATAL("out-of-bound read at address 0x%08x (buffer size %zu)", addr, mem->size);
 	}
-	uint32_t result = (mem->buffer[addr + 3]) << 24;
-	result |= (mem->buffer[addr + 2]) << 16;
-	result |= (mem->buffer[addr + 1]) << 8;
-	result |= (mem->buffer[addr]);
+	uint32_t result = (uint32_t)(mem->buffer[addr + 3]) << 24;
+	result |= (uint32_t)(mem->buffer[addr + 2]) << 16;
+	result |= (uint32_t)(mem->buffer[addr + 1]) << 8;
+	result |= (uint32_t)(mem->buffer[addr]);
 	return result;
 }
 
