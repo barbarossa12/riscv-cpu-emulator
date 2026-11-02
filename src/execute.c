@@ -56,12 +56,18 @@ static uint32_t execute_op_imm(CPU *cpu, Memory *mem, DecodedInstruction *instr,
         }
         case 0x1: // SLLI
         {
+            if (instr->funct7 != 0x00) {
+                return trap_enter(cpu, pc, 2, instr->raw); // illegal instruction
+            }
             uint32_t rs1_val = cpu_read_reg(cpu, instr->rs1);
             cpu_write_reg(cpu, instr->rd, rs1_val << instr->rs2);
             return pc + 4;
         }
         case 0x05: // SRLI or SRAI
         {
+            if (instr->funct7 != 0x00 && instr->funct7 != 0x20) {
+                return trap_enter(cpu, pc, 2, instr->raw); // illegal instruction
+            }
             uint32_t rs1_val = cpu_read_reg(cpu, instr->rs1);
             if(instr->funct7 == 0x00) { // SRLI case
                 cpu_write_reg(cpu, instr->rd, rs1_val >> instr->rs2);
@@ -82,6 +88,11 @@ static uint32_t execute_op_imm(CPU *cpu, Memory *mem, DecodedInstruction *instr,
 
 static uint32_t execute_op(CPU *cpu, Memory *mem, DecodedInstruction *instr, uint32_t pc) {
     (void)mem;
+    // funct7 is 0x00 for every OP instruction except SUB and SRA, which use 0x20
+    bool uses_alt = (instr->funct3 == 0x0 || instr->funct3 == 0x5);
+    if (instr->funct7 != 0x00 && !(uses_alt && instr->funct7 == 0x20)) {
+        return trap_enter(cpu, pc, 2, instr->raw); // illegal instruction
+    }
     switch(instr->funct3) {
         case 0x0: // ADD or SUB
         {
@@ -89,7 +100,7 @@ static uint32_t execute_op(CPU *cpu, Memory *mem, DecodedInstruction *instr, uin
             uint32_t rs2_val = cpu_read_reg(cpu, instr->rs2);
             if(instr->funct7 == 0x00) {
                 cpu_write_reg(cpu, instr->rd, rs1_val + rs2_val); // ADD
-            } else {
+            } else { // SUB (funct7 == 0x20)
                 cpu_write_reg(cpu, instr->rd, rs1_val - rs2_val); // SUB
             }
             return pc + 4;
