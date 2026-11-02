@@ -13,6 +13,8 @@ static uint32_t execute_jalr(CPU *cpu, Memory *mem, DecodedInstruction *instr, u
 static uint32_t execute_fence(CPU *cpu, Memory *mem, DecodedInstruction *instr, uint32_t pc);
 static uint32_t execute_system(CPU *cpu, Memory *mem, DecodedInstruction *instr, uint32_t pc);
 static uint32_t trap_enter(CPU *cpu, uint32_t pc, uint32_t cause, uint32_t tval);
+static bool target_misaligned(uint32_t target);
+static uint32_t take_branch(CPU *cpu, uint32_t pc, DecodedInstruction *instr);
 
 
 static uint32_t execute_op_imm(CPU *cpu, Memory *mem, DecodedInstruction *instr, uint32_t pc) {
@@ -290,7 +292,7 @@ static uint32_t execute_branch(CPU *cpu, Memory *mem, DecodedInstruction *instr,
             uint32_t rs1_val = cpu_read_reg(cpu, instr->rs1);
             uint32_t rs2_val = cpu_read_reg(cpu, instr->rs2);
             if(rs1_val == rs2_val) {
-                return pc + (uint32_t)instr->imm;
+                return take_branch(cpu, pc, instr);
             }
             return pc + 4;
         }
@@ -299,7 +301,7 @@ static uint32_t execute_branch(CPU *cpu, Memory *mem, DecodedInstruction *instr,
             uint32_t rs1_val = cpu_read_reg(cpu, instr->rs1);
             uint32_t rs2_val = cpu_read_reg(cpu, instr->rs2);
             if(rs1_val != rs2_val) {
-                return pc + (uint32_t)instr->imm;
+                return take_branch(cpu, pc, instr);
             }
             return pc + 4;
         }
@@ -308,7 +310,7 @@ static uint32_t execute_branch(CPU *cpu, Memory *mem, DecodedInstruction *instr,
             uint32_t rs1_val = cpu_read_reg(cpu, instr->rs1);
             uint32_t rs2_val = cpu_read_reg(cpu, instr->rs2);
             if((int32_t)rs1_val < (int32_t)rs2_val) {
-                return pc + (uint32_t)instr->imm;
+                return take_branch(cpu, pc, instr);
             }
             return pc + 4;
         }
@@ -317,7 +319,7 @@ static uint32_t execute_branch(CPU *cpu, Memory *mem, DecodedInstruction *instr,
             uint32_t rs1_val = cpu_read_reg(cpu, instr->rs1);
             uint32_t rs2_val = cpu_read_reg(cpu, instr->rs2);
             if((int32_t)rs1_val >= (int32_t)rs2_val) {
-                return pc + (uint32_t)instr->imm;
+                return take_branch(cpu, pc, instr);
             }
             return pc + 4;
         }
@@ -326,7 +328,7 @@ static uint32_t execute_branch(CPU *cpu, Memory *mem, DecodedInstruction *instr,
             uint32_t rs1_val = cpu_read_reg(cpu, instr->rs1);
             uint32_t rs2_val = cpu_read_reg(cpu, instr->rs2);
             if(rs1_val < rs2_val) {
-                return pc + (uint32_t)instr->imm;
+                return take_branch(cpu, pc, instr);
             }
             return pc + 4;
         }
@@ -335,7 +337,7 @@ static uint32_t execute_branch(CPU *cpu, Memory *mem, DecodedInstruction *instr,
             uint32_t rs1_val = cpu_read_reg(cpu, instr->rs1);
             uint32_t rs2_val = cpu_read_reg(cpu, instr->rs2);
             if(rs1_val >= rs2_val) {
-                return pc + (uint32_t)instr->imm;
+                return take_branch(cpu, pc, instr);
             }
             return pc + 4;
         }
@@ -347,8 +349,12 @@ static uint32_t execute_branch(CPU *cpu, Memory *mem, DecodedInstruction *instr,
 
 static uint32_t execute_jal(CPU *cpu, Memory *mem, DecodedInstruction *instr, uint32_t pc) {
     (void)mem;
+    uint32_t target = pc + (uint32_t)instr->imm;
+    if (target_misaligned(target)) {
+        return trap_enter(cpu, pc, 0, target); // instruction address misaligned
+    }
     cpu_write_reg(cpu, instr->rd, pc + 4);
-    return pc + (uint32_t)instr->imm;
+    return target;
 }
 
 static uint32_t execute_jalr(CPU *cpu, Memory *mem, DecodedInstruction *instr, uint32_t pc) {
@@ -358,6 +364,9 @@ static uint32_t execute_jalr(CPU *cpu, Memory *mem, DecodedInstruction *instr, u
         {
             uint32_t rs1_val = cpu_read_reg(cpu, instr->rs1);
             uint32_t target = (rs1_val + (uint32_t)instr->imm) & ~1u;
+            if (target_misaligned(target)) {
+                return trap_enter(cpu, pc, 0, target); // instruction address misaligned
+            }
             cpu_write_reg(cpu, instr->rd, pc + 4);
             return target;
         }
@@ -451,6 +460,20 @@ static uint32_t execute_system(CPU *cpu, Memory *mem, DecodedInstruction *instr,
             return trap_enter(cpu, pc, 2, instr->raw); // illegal instruction
     }
     return pc + 4;
+}
+
+// IALIGN=32: a taken branch/jump target must be 4-byte aligned
+static bool target_misaligned(uint32_t target) {
+    return (target & 0x3u) != 0;
+}
+
+// Target of a taken conditional branch, or a misaligned-instruction trap
+static uint32_t take_branch(CPU *cpu, uint32_t pc, DecodedInstruction *instr) {
+    uint32_t target = pc + (uint32_t)instr->imm;
+    if (target_misaligned(target)) {
+        return trap_enter(cpu, pc, 0, target); // instruction address misaligned
+    }
+    return target;
 }
 
 static uint32_t trap_enter(CPU *cpu, uint32_t pc, uint32_t cause, uint32_t tval) {
