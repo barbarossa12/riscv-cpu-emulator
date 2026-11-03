@@ -14,6 +14,7 @@ static uint32_t execute_fence(CPU *cpu, Memory *mem, DecodedInstruction *instr, 
 static uint32_t execute_system(CPU *cpu, Memory *mem, DecodedInstruction *instr, uint32_t pc);
 static uint32_t trap_enter(CPU *cpu, uint32_t pc, uint32_t cause, uint32_t tval);
 static bool target_misaligned(uint32_t target);
+static bool csr_exists(uint16_t csr_addr);
 static bool csr_is_read_only(uint16_t csr_addr);
 static bool csr_is_debug_only(uint16_t csr_addr);
 static bool csr_instr_writes(DecodedInstruction *instr);
@@ -396,6 +397,9 @@ static uint32_t execute_system(CPU *cpu, Memory *mem, DecodedInstruction *instr,
     (void)mem;
     uint16_t csr_addr = (uint16_t)(instr->imm & 0xFFF);
     // funct3 == 0 is ECALL/EBREAK/MRET, whose imm field is not a CSR address
+    if (instr->funct3 != 0 && !csr_exists(csr_addr)) {
+        return trap_enter(cpu, pc, 2, instr->raw); // non-existent CSR is reserved: illegal instruction
+    }
     if (instr->funct3 != 0 && csr_is_debug_only(csr_addr)) {
         return trap_enter(cpu, pc, 2, instr->raw); // debug-mode-only CSR: illegal instruction
     }
@@ -478,6 +482,20 @@ static uint32_t execute_system(CPU *cpu, Memory *mem, DecodedInstruction *instr,
             return trap_enter(cpu, pc, 2, instr->raw); // illegal instruction
     }
     return pc + 4;
+}
+
+// Only the CSRs we implement exist; every other address is reserved and traps
+static bool csr_exists(uint16_t csr_addr) {
+    switch (csr_addr) {
+        case CSR_MSTATUS: case CSR_MISA: case CSR_MIE: case CSR_MTVEC:
+        case CSR_MSCRATCH: case CSR_MEPC: case CSR_MCAUSE: case CSR_MTVAL:
+        case CSR_MIP:
+        case CSR_TSELECT: case CSR_TDATA1: case CSR_TDATA2:
+        case CSR_MVENDORID: case CSR_MARCHID: case CSR_MIMPID: case CSR_MHARTID:
+            return true;
+        default:
+            return false;
+    }
 }
 
 // csr[11:10] == 0b11 marks a read-only CSR address
