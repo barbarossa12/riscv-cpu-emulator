@@ -1820,6 +1820,81 @@ void test_cpu_step_fetch_fault_changes_no_registers_or_memory(void) {
     mem_free(&mem);
 }
 
+/* FENCE.I (Zifencei, funct3 = 1): a no-op that ignores funct12, rs1 and rd. Every register
+ * holds a sentinel, so a wrongly written rd shows up. */
+static void assert_fence_i_is_noop(uint32_t encoding) {
+    CPU cpu = {0};
+    Memory mem;
+    mem_init(&mem, 16);
+
+    cpu_write_csr(&cpu, CSR_MCAUSE, 0x77); // marker: no trap must overwrite it
+    for (uint8_t r = 1; r < 32; r++) {
+        cpu_write_reg(&cpu, r, 0xA000u + r);
+    }
+    mem_write32(&mem, 0, encoding);
+
+    uint32_t raw = mem_read32(&mem, cpu.pc);
+    DecodedInstruction instr = decode_instruction(raw);
+    execute(&cpu, &mem, &instr);
+
+    TEST_ASSERT_EQUAL_UINT32(4, cpu.pc);
+    TEST_ASSERT_EQUAL_UINT32(0x77, cpu_read_csr(&cpu, CSR_MCAUSE));
+    for (uint8_t r = 1; r < 32; r++) {
+        TEST_ASSERT_EQUAL_UINT32(0xA000u + r, cpu_read_reg(&cpu, r));
+    }
+    mem_free(&mem);
+}
+
+void test_fence_i(void) {
+    assert_fence_i_is_noop(0x0000100F); // FENCE.I
+}
+
+void test_fence_i_ignores_rs1(void) {
+    assert_fence_i_is_noop(0x0001100F); // rs1 = x2
+}
+
+void test_fence_i_ignores_rd(void) {
+    assert_fence_i_is_noop(0x0000108F); // rd = x1: must not be written
+}
+
+void test_fence_i_ignores_funct12(void) {
+    assert_fence_i_is_noop(0xFF00100F); // funct12 = 0xFF0
+}
+
+void test_fence_i_ignores_all_reserved_fields(void) {
+    assert_fence_i_is_noop(0xFFFF9F8F); // funct12 = 0xFFF, rs1 = x31, rd = x31
+}
+
+/* Only funct3 = 0 (FENCE) and 1 (FENCE.I) exist in MISC-MEM */
+void test_misc_mem_funct3_2_is_illegal(void) {
+    assert_illegal_instruction(0x0000200F);
+}
+
+void test_misc_mem_funct3_7_is_illegal(void) {
+    assert_illegal_instruction(0x0000700F);
+}
+
+/* The pattern FENCE.I exists for: store a new instruction, FENCE.I, run it. */
+void test_fence_i_makes_stored_instruction_visible(void) {
+    CPU cpu = {0};
+    Memory mem;
+    mem_init(&mem, 32);
+
+    cpu_write_reg(&cpu, 2, 0x00700093);  // ADDI x1, x0, 7
+    mem_write32(&mem, 0, 0x00202623);    // SW x2, 12(x0): overwrite the word at 12
+    mem_write32(&mem, 4, 0x0000100F);    // FENCE.I
+    mem_write32(&mem, 8, 0x00000013);    // NOP
+    mem_write32(&mem, 12, 0x00500093);   // ADDI x1, x0, 5 (about to be replaced)
+
+    for (int i = 0; i < 4; i++) {
+        cpu_step(&cpu, &mem);
+    }
+
+    TEST_ASSERT_EQUAL_UINT32(16, cpu.pc);
+    TEST_ASSERT_EQUAL_UINT32(7, cpu_read_reg(&cpu, 1)); // ran the new instruction, not the old
+    mem_free(&mem);
+}
+
 void test_mret_returns_to_mepc(void) {
     CPU cpu = {0};
     Memory mem;
@@ -1983,6 +2058,14 @@ int main(void) {
     RUN_TEST(test_cpu_step_fetch_at_top_of_address_space_faults);
     RUN_TEST(test_cpu_step_fetch_fault_updates_trap_state);
     RUN_TEST(test_cpu_step_fetch_fault_changes_no_registers_or_memory);
+    RUN_TEST(test_fence_i);
+    RUN_TEST(test_fence_i_ignores_rs1);
+    RUN_TEST(test_fence_i_ignores_rd);
+    RUN_TEST(test_fence_i_ignores_funct12);
+    RUN_TEST(test_fence_i_ignores_all_reserved_fields);
+    RUN_TEST(test_misc_mem_funct3_2_is_illegal);
+    RUN_TEST(test_misc_mem_funct3_7_is_illegal);
+    RUN_TEST(test_fence_i_makes_stored_instruction_visible);
     RUN_TEST(test_mret_returns_to_mepc);
     RUN_TEST(test_mret_restores_mie_from_mpie);
 	return UNITY_END();
