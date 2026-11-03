@@ -23,6 +23,7 @@ add_library(riscv_core
     src/log.c
     src/decode.c
     src/execute.c
+    src/elf.c
 )
 target_include_directories(riscv_core PUBLIC src)
 
