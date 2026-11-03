@@ -71,6 +71,41 @@ void test_cpu_other_csrs_keep_low_bits(void) {
 	TEST_ASSERT_EQUAL_UINT32(0x1003, cpu_read_csr(&test_cpu, CSR_MSCRATCH));
 }
 
+void test_cpu_misa_reports_rv32i(void) {
+	CPU test_cpu = {0};
+	TEST_ASSERT_EQUAL_UINT32(0x40000100, cpu_read_csr(&test_cpu, CSR_MISA));
+}
+
+void test_cpu_misa_writes_are_ignored(void) {
+	CPU test_cpu = {0};
+	cpu_write_csr(&test_cpu, CSR_MISA, 0xFFFFFFFF); // tries to enable C, S, U, F, ...
+	TEST_ASSERT_EQUAL_UINT32(0x40000100, cpu_read_csr(&test_cpu, CSR_MISA));
+	cpu_write_csr(&test_cpu, CSR_MISA, 0);
+	TEST_ASSERT_EQUAL_UINT32(0x40000100, cpu_read_csr(&test_cpu, CSR_MISA));
+}
+
+void test_cpu_id_csrs_read_zero(void) {
+	CPU test_cpu = {0};
+	test_cpu.csr[CSR_MVENDORID] = 0xDEAD; // raw storage must not leak through
+	test_cpu.csr[CSR_MARCHID] = 0xDEAD;
+	test_cpu.csr[CSR_MIMPID] = 0xDEAD;
+	test_cpu.csr[CSR_MHARTID] = 0xDEAD;
+	TEST_ASSERT_EQUAL_UINT32(0, cpu_read_csr(&test_cpu, CSR_MVENDORID));
+	TEST_ASSERT_EQUAL_UINT32(0, cpu_read_csr(&test_cpu, CSR_MARCHID));
+	TEST_ASSERT_EQUAL_UINT32(0, cpu_read_csr(&test_cpu, CSR_MIMPID));
+	TEST_ASSERT_EQUAL_UINT32(0, cpu_read_csr(&test_cpu, CSR_MHARTID));
+}
+
+void test_cpu_trigger_csrs_are_hardwired_zero(void) {
+	CPU test_cpu = {0};
+	cpu_write_csr(&test_cpu, CSR_TSELECT, 5);
+	cpu_write_csr(&test_cpu, CSR_TDATA1, 0x20001040);
+	cpu_write_csr(&test_cpu, CSR_TDATA2, 0x80000000);
+	TEST_ASSERT_EQUAL_UINT32(0, cpu_read_csr(&test_cpu, CSR_TSELECT));
+	TEST_ASSERT_EQUAL_UINT32(0, cpu_read_csr(&test_cpu, CSR_TDATA1));
+	TEST_ASSERT_EQUAL_UINT32(0, cpu_read_csr(&test_cpu, CSR_TDATA2));
+}
+
 int main(void) {
 	UNITY_BEGIN();
 	RUN_TEST(test_cpu_write_read_roundtrip_x5);
@@ -82,6 +117,10 @@ int main(void) {
 	RUN_TEST(test_cpu_csr_writes_are_independent);
 	RUN_TEST(test_cpu_mtvec_mode_bits_read_as_zero);
 	RUN_TEST(test_cpu_other_csrs_keep_low_bits);
+	RUN_TEST(test_cpu_misa_reports_rv32i);
+	RUN_TEST(test_cpu_misa_writes_are_ignored);
+	RUN_TEST(test_cpu_id_csrs_read_zero);
+	RUN_TEST(test_cpu_trigger_csrs_are_hardwired_zero);
 	return UNITY_END();
 }
 
