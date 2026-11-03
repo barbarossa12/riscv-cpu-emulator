@@ -243,6 +243,78 @@ void test_mem_try_8bit_top_of_address_space(void) {
     mem_free(&test_mem);
 }
 
+#define TEST_BASE 0x80000000u
+
+void test_mem_based_roundtrip_at_base(void) {
+    Memory m;
+    mem_init_at(&m, TEST_BASE, 16);
+    mem_write32(&m, TEST_BASE, 0xAABBCCDD);
+    TEST_ASSERT_EQUAL_UINT32(0xAABBCCDD, mem_read32(&m, TEST_BASE));
+    TEST_ASSERT_EQUAL_UINT8(0xDD, m.buffer[0]); // base maps to buffer[0]
+    TEST_ASSERT_EQUAL_UINT8(0xAA, m.buffer[3]);
+    mem_free(&m);
+}
+
+void test_mem_based_roundtrip_at_end(void) {
+    Memory m;
+    mem_init_at(&m, TEST_BASE, 16);
+    mem_write32(&m, TEST_BASE + 12, 0x11223344);
+    mem_write16(&m, TEST_BASE + 10, 0x5566);
+    mem_write8(&m, TEST_BASE + 15, 0x77);
+    TEST_ASSERT_EQUAL_UINT32(0x77223344, mem_read32(&m, TEST_BASE + 12));
+    TEST_ASSERT_EQUAL_UINT16(0x5566, mem_read16(&m, TEST_BASE + 10));
+    TEST_ASSERT_EQUAL_UINT8(0x77, mem_read8(&m, TEST_BASE + 15));
+    mem_free(&m);
+}
+
+void test_mem_based_below_base_fails(void) {
+    Memory m;
+    mem_init_at(&m, TEST_BASE, 16);
+    uint8_t v8; uint16_t v16; uint32_t v32;
+    TEST_ASSERT_FALSE(mem_try_read8(&m, TEST_BASE - 1, &v8));
+    TEST_ASSERT_FALSE(mem_try_read8(&m, 0, &v8));
+    TEST_ASSERT_FALSE(mem_try_read16(&m, TEST_BASE - 1, &v16)); // straddles the start
+    TEST_ASSERT_FALSE(mem_try_read32(&m, TEST_BASE - 3, &v32));
+    TEST_ASSERT_FALSE(mem_try_write8(&m, TEST_BASE - 1, 1));
+    TEST_ASSERT_FALSE(mem_try_write16(&m, TEST_BASE - 1, 1));
+    TEST_ASSERT_FALSE(mem_try_write32(&m, TEST_BASE - 4, 1));
+    mem_free(&m);
+}
+
+void test_mem_based_past_end_fails(void) {
+    Memory m;
+    mem_init_at(&m, TEST_BASE, 16);
+    uint8_t v8; uint16_t v16; uint32_t v32;
+    TEST_ASSERT_FALSE(mem_try_read8(&m, TEST_BASE + 16, &v8));
+    TEST_ASSERT_FALSE(mem_try_read16(&m, TEST_BASE + 15, &v16)); // straddles the end
+    TEST_ASSERT_FALSE(mem_try_read32(&m, TEST_BASE + 13, &v32));
+    TEST_ASSERT_FALSE(mem_try_write8(&m, TEST_BASE + 16, 1));
+    TEST_ASSERT_FALSE(mem_try_write16(&m, TEST_BASE + 15, 1));
+    TEST_ASSERT_FALSE(mem_try_write32(&m, TEST_BASE + 13, 1));
+    TEST_ASSERT_TRUE(mem_try_read32(&m, TEST_BASE + 12, &v32)); // last whole word is fine
+    mem_free(&m);
+}
+
+void test_mem_based_region_at_top_of_address_space(void) {
+    Memory m;
+    mem_init_at(&m, 0xFFFFFFF0u, 16);
+    uint8_t v8; uint32_t v32;
+    TEST_ASSERT_TRUE(mem_try_write32(&m, 0xFFFFFFFCu, 0xCAFEF00D));
+    TEST_ASSERT_TRUE(mem_try_read32(&m, 0xFFFFFFFCu, &v32));
+    TEST_ASSERT_EQUAL_UINT32(0xCAFEF00D, v32);
+    TEST_ASSERT_TRUE(mem_try_read8(&m, 0xFFFFFFFFu, &v8));
+    TEST_ASSERT_FALSE(mem_try_read32(&m, 0xFFFFFFFDu, &v32)); // would wrap past 2^32
+    TEST_ASSERT_FALSE(mem_try_read8(&m, 0, &v8));             // wrapped address is outside
+    mem_free(&m);
+}
+
+void test_mem_init_has_base_zero(void) {
+    Memory m;
+    mem_init(&m, 16);
+    TEST_ASSERT_EQUAL_UINT32(0, m.base);
+    mem_free(&m);
+}
+
 int main(void) {
 	UNITY_BEGIN();
 	RUN_TEST(test_write_then_read_8bit_roundtrip);
@@ -262,6 +334,12 @@ int main(void) {
     RUN_TEST(test_mem_try_write16_wraparound);
     RUN_TEST(test_mem_try_write32_wraparound);
     RUN_TEST(test_mem_try_8bit_top_of_address_space);
+    RUN_TEST(test_mem_based_roundtrip_at_base);
+    RUN_TEST(test_mem_based_roundtrip_at_end);
+    RUN_TEST(test_mem_based_below_base_fails);
+    RUN_TEST(test_mem_based_past_end_fails);
+    RUN_TEST(test_mem_based_region_at_top_of_address_space);
+    RUN_TEST(test_mem_init_has_base_zero);
 
 	return UNITY_END();
 }
