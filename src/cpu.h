@@ -2,6 +2,7 @@
 #include <stdint.h>
 
 #define CSR_MSTATUS  0x300
+#define CSR_MISA      0x301
 #define CSR_MIE      0x304
 #define CSR_MTVEC    0x305
 #define CSR_MSCRATCH 0x340
@@ -9,6 +10,16 @@
 #define CSR_MCAUSE   0x342
 #define CSR_MTVAL    0x343
 #define CSR_MIP      0x344
+#define CSR_TSELECT   0x7A0
+#define CSR_TDATA1    0x7A1
+#define CSR_TDATA2    0x7A2
+#define CSR_MVENDORID 0xF11
+#define CSR_MARCHID   0xF12
+#define CSR_MIMPID    0xF13
+#define CSR_MHARTID   0xF14
+
+// MXL=1 (RV32) in bits 31:30, and the I extension at bit 8
+#define MISA_VALUE    0x40000100u
 
 #define MSTATUS_MIE  (1u << 3)
 #define MSTATUS_MPIE (1u << 7)
