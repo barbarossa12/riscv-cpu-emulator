@@ -1660,6 +1660,166 @@ void test_tdata1_write_does_not_read_back(void) {
     mem_free(&mem);
 }
 
+/* cpu_step: fetch + decode + execute. A fetch outside memory is an instruction access fault
+ * (cause 1, mtval = the faulting pc), not an abort. */
+static void assert_fetch_fault(Memory *mem, uint32_t start_pc) {
+    CPU cpu = {0};
+    cpu_write_csr(&cpu, CSR_MTVEC, 0x1000);
+    cpu_write_reg(&cpu, 1, 0xDEADBEEF);
+    cpu.pc = start_pc;
+
+    cpu_step(&cpu, mem);
+
+    TEST_ASSERT_EQUAL_UINT32(0x1000, cpu.pc);
+    TEST_ASSERT_EQUAL_UINT32(start_pc, cpu_read_csr(&cpu, CSR_MEPC));
+    TEST_ASSERT_EQUAL_UINT32(1, cpu_read_csr(&cpu, CSR_MCAUSE));
+    TEST_ASSERT_EQUAL_UINT32(start_pc, cpu_read_csr(&cpu, CSR_MTVAL));
+    TEST_ASSERT_EQUAL_UINT32(0xDEADBEEF, cpu_read_reg(&cpu, 1));
+}
+
+void test_cpu_step_executes_fetched_instruction(void) {
+    CPU cpu = {0};
+    Memory mem;
+    mem_init(&mem, 16);
+    cpu_write_csr(&cpu, CSR_MCAUSE, 0x77); // marker: no trap must overwrite it
+    mem_write32(&mem, 0, 0x00500093); // ADDI x1, x0, 5
+
+    cpu_step(&cpu, &mem);
+
+    TEST_ASSERT_EQUAL_UINT32(5, cpu_read_reg(&cpu, 1));
+    TEST_ASSERT_EQUAL_UINT32(4, cpu.pc);
+    TEST_ASSERT_EQUAL_UINT32(0x77, cpu_read_csr(&cpu, CSR_MCAUSE));
+    mem_free(&mem);
+}
+
+void test_cpu_step_two_steps_in_sequence(void) {
+    CPU cpu = {0};
+    Memory mem;
+    mem_init(&mem, 16);
+    mem_write32(&mem, 0, 0x00500093); // ADDI x1, x0, 5
+    mem_write32(&mem, 4, 0x00A08093); // ADDI x1, x1, 10
+
+    cpu_step(&cpu, &mem);
+    cpu_step(&cpu, &mem);
+
+    TEST_ASSERT_EQUAL_UINT32(15, cpu_read_reg(&cpu, 1));
+    TEST_ASSERT_EQUAL_UINT32(8, cpu.pc);
+    mem_free(&mem);
+}
+
+void test_cpu_step_fetches_last_whole_word(void) {
+    CPU cpu = {0};
+    Memory mem;
+    mem_init(&mem, 16);
+    cpu_write_csr(&cpu, CSR_MCAUSE, 0x77);
+    mem_write32(&mem, 12, 0x00500093); // ADDI x1, x0, 5
+    cpu.pc = 12;
+
+    cpu_step(&cpu, &mem);
+
+    TEST_ASSERT_EQUAL_UINT32(5, cpu_read_reg(&cpu, 1));
+    TEST_ASSERT_EQUAL_UINT32(16, cpu.pc);
+    TEST_ASSERT_EQUAL_UINT32(0x77, cpu_read_csr(&cpu, CSR_MCAUSE));
+    mem_free(&mem);
+}
+
+void test_cpu_step_based_memory_fetch_works(void) {
+    CPU cpu = {0};
+    Memory mem;
+    mem_init_at(&mem, 0x80000000u, 16);
+    mem_write32(&mem, 0x80000000u, 0x00500093); // ADDI x1, x0, 5
+    cpu.pc = 0x80000000u;
+
+    cpu_step(&cpu, &mem);
+
+    TEST_ASSERT_EQUAL_UINT32(5, cpu_read_reg(&cpu, 1));
+    TEST_ASSERT_EQUAL_UINT32(0x80000004u, cpu.pc);
+    mem_free(&mem);
+}
+
+void test_cpu_step_fetch_past_end_faults(void) {
+    Memory mem;
+    mem_init(&mem, 16);
+    assert_fetch_fault(&mem, 0x1000);
+    mem_free(&mem);
+}
+
+void test_cpu_step_fetch_at_size_faults(void) {
+    Memory mem;
+    mem_init(&mem, 16);
+    assert_fetch_fault(&mem, 16);
+    mem_free(&mem);
+}
+
+void test_cpu_step_fetch_straddling_end_faults(void) {
+    Memory mem;
+    mem_init(&mem, 16);
+    assert_fetch_fault(&mem, 14);
+    mem_free(&mem);
+}
+
+void test_cpu_step_fetch_below_base_faults(void) {
+    Memory mem;
+    mem_init_at(&mem, 0x80000000u, 16);
+    assert_fetch_fault(&mem, 0x7FFFFFFCu);
+    mem_free(&mem);
+}
+
+void test_cpu_step_fetch_at_zero_with_based_memory_faults(void) {
+    Memory mem;
+    mem_init_at(&mem, 0x80000000u, 16);
+    assert_fetch_fault(&mem, 0);
+    mem_free(&mem);
+}
+
+void test_cpu_step_fetch_at_top_of_address_space_faults(void) {
+    Memory mem;
+    mem_init(&mem, 16);
+    assert_fetch_fault(&mem, 0xFFFFFFFCu); // must not wrap around into low memory
+    mem_free(&mem);
+}
+
+void test_cpu_step_fetch_fault_updates_trap_state(void) {
+    CPU cpu = {0};
+    Memory mem;
+    mem_init(&mem, 16);
+    cpu_write_csr(&cpu, CSR_MTVEC, 0x1000);
+    cpu_write_csr(&cpu, CSR_MSTATUS, MSTATUS_MIE);
+    cpu.pc = 0x1000;
+
+    cpu_step(&cpu, &mem);
+
+    uint32_t mstatus = cpu_read_csr(&cpu, CSR_MSTATUS);
+    TEST_ASSERT_EQUAL_UINT32(0, mstatus & MSTATUS_MIE);
+    TEST_ASSERT_EQUAL_UINT32(MSTATUS_MPIE, mstatus & MSTATUS_MPIE);
+    TEST_ASSERT_EQUAL_UINT32(MSTATUS_MPP, mstatus & MSTATUS_MPP);
+    mem_free(&mem);
+}
+
+void test_cpu_step_fetch_fault_changes_no_registers_or_memory(void) {
+    CPU cpu = {0};
+    Memory mem;
+    mem_init(&mem, 16);
+    for (size_t i = 0; i < mem.size; i++) {
+        mem.buffer[i] = 0xAA;
+    }
+    for (uint8_t r = 1; r < 32; r++) {
+        cpu_write_reg(&cpu, r, 0x100u + r);
+    }
+    cpu_write_csr(&cpu, CSR_MTVEC, 0x1000);
+    cpu.pc = 0x1000;
+
+    cpu_step(&cpu, &mem);
+
+    for (uint8_t r = 1; r < 32; r++) {
+        TEST_ASSERT_EQUAL_UINT32(0x100u + r, cpu_read_reg(&cpu, r));
+    }
+    for (size_t i = 0; i < mem.size; i++) {
+        TEST_ASSERT_EQUAL_UINT8(0xAA, mem.buffer[i]);
+    }
+    mem_free(&mem);
+}
+
 void test_mret_returns_to_mepc(void) {
     CPU cpu = {0};
     Memory mem;
@@ -1811,6 +1971,18 @@ int main(void) {
     RUN_TEST(test_csrr_misa_reports_rv32i);
     RUN_TEST(test_csrr_tdata1_reads_zero);
     RUN_TEST(test_tdata1_write_does_not_read_back);
+    RUN_TEST(test_cpu_step_executes_fetched_instruction);
+    RUN_TEST(test_cpu_step_two_steps_in_sequence);
+    RUN_TEST(test_cpu_step_fetches_last_whole_word);
+    RUN_TEST(test_cpu_step_based_memory_fetch_works);
+    RUN_TEST(test_cpu_step_fetch_past_end_faults);
+    RUN_TEST(test_cpu_step_fetch_at_size_faults);
+    RUN_TEST(test_cpu_step_fetch_straddling_end_faults);
+    RUN_TEST(test_cpu_step_fetch_below_base_faults);
+    RUN_TEST(test_cpu_step_fetch_at_zero_with_based_memory_faults);
+    RUN_TEST(test_cpu_step_fetch_at_top_of_address_space_faults);
+    RUN_TEST(test_cpu_step_fetch_fault_updates_trap_state);
+    RUN_TEST(test_cpu_step_fetch_fault_changes_no_registers_or_memory);
     RUN_TEST(test_mret_returns_to_mepc);
     RUN_TEST(test_mret_restores_mie_from_mpie);
 	return UNITY_END();
