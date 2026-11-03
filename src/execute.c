@@ -572,3 +572,13 @@ void execute(CPU *cpu, Memory *mem, DecodedInstruction *instr) {
         break;
     }
 }
+
+void cpu_step(CPU *cpu, Memory *mem) {
+    uint32_t raw;
+    if (!mem_try_read32(mem, cpu->pc, &raw)) {
+        cpu->pc = trap_enter(cpu, cpu->pc, 1, cpu->pc); // instruction access fault
+        return;
+    }
+    DecodedInstruction instr = decode_instruction(raw);
+    execute(cpu, mem, &instr);
+}
