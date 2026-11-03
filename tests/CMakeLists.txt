@@ -32,10 +32,13 @@ add_test(NAME test_elf COMMAND test_elf)
 
 # --- Abort-path tests -------------------------------------------------------
 # Each of these is a tiny standalone executable (NOT using Unity) that
-# deliberately triggers one specific LOG_FATAL/abort() path. CTest normally
-# treats a non-zero/signal exit as failure; WILL_FAIL inverts that, and
-# PASS_REGULAR_EXPRESSION additionally checks stderr for the expected
-# message, so the test only "passes" if it crashed for the RIGHT reason.
+# deliberately triggers one specific LOG_FATAL/abort() path. WILL_FAIL cannot
+# be used here: when the executable dies by signal (SIGABRT), CTest's own
+# crash detection overrides both WILL_FAIL and PASS_REGULAR_EXPRESSION. So
+# each test runs through `cmake -E env`, which turns the crash into a plain
+# non-zero exit, and only PASS_REGULAR_EXPRESSION is set: the test passes
+# only if stderr holds the expected message, i.e. it crashed for the RIGHT
+# reason.
 
 add_executable(test_mem_read8_oob test_mem_read8_oob.c)
 target_link_libraries(test_mem_read8_oob PRIVATE riscv_core)
@@ -90,3 +93,4 @@ set_tests_properties(test_cpu_csr_oob PROPERTIES
     PASS_REGULAR_EXPRESSION "larger than 0xFFF"
 )
 
+include(riscv-tests.cmake)
