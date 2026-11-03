@@ -32,6 +32,11 @@ uint32_t cpu_read_csr(CPU *cpu, uint16_t addr){
 		LOG_FATAL("CPU CSR register value larger than 0xFFF: 0x%x", addr);
 	}
 	switch(addr) {
+		case CSR_MSTATUS:
+			// MPP is WARL and can hold only implemented modes. M-mode is the only one,
+			// so MPP is hardwired to M. Forced here so it holds from reset, whatever
+			// was written.
+			return cpu->csr[addr] | MSTATUS_MPP;
 		case CSR_MISA:
 			return MISA_VALUE;
 		case CSR_MVENDORID:
