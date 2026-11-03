@@ -31,16 +31,36 @@ uint32_t cpu_read_csr(CPU *cpu, uint16_t addr){
 	if(addr > 0xFFF) {
 		LOG_FATAL("CPU CSR register value larger than 0xFFF: 0x%x", addr);
 	}
-	return cpu->csr[addr];
+	switch(addr) {
+		case CSR_MISA:
+			return MISA_VALUE;
+		case CSR_MVENDORID:
+		case CSR_MARCHID:
+		case CSR_MIMPID:
+		case CSR_MHARTID:
+		case CSR_TSELECT:  // no triggers implemented
+		case CSR_TDATA1:
+		case CSR_TDATA2:
+			return 0;
+		default:
+			return cpu->csr[addr];
+	}
 }
 
 void cpu_write_csr(CPU *cpu, uint16_t addr, uint32_t value) {
 	if(addr > 0xFFF) {
 		LOG_FATAL("CPU CSR register value larger than 0xFFF: 0x%x", addr);
 	}
-	if(addr == CSR_MTVEC) {
-		// MODE is WARL: only Direct (0) is supported, so MODE reads back as 0
-		value &= ~0x3u;
+	switch(addr) {
+		case CSR_MISA:    // WARL: no extension can be toggled, so writes are ignored
+		case CSR_TSELECT: // no triggers implemented: hardwired to 0
+		case CSR_TDATA1:
+		case CSR_TDATA2:
+			return;
+		case CSR_MTVEC:
+			// MODE is WARL: only Direct (0) is supported, so MODE reads back as 0
+			value &= ~0x3u;
+			break;
 	}
 	cpu->csr[addr] = value;
 }
