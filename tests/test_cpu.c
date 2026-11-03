@@ -106,6 +106,25 @@ void test_cpu_trigger_csrs_are_hardwired_zero(void) {
 	TEST_ASSERT_EQUAL_UINT32(0, cpu_read_csr(&test_cpu, CSR_TDATA2));
 }
 
+void test_cpu_mstatus_mpp_is_m_from_reset(void) {
+	CPU test_cpu = {0};
+	TEST_ASSERT_EQUAL_UINT32(MSTATUS_MPP, cpu_read_csr(&test_cpu, CSR_MSTATUS));
+}
+
+void test_cpu_mstatus_mpp_ignores_writes(void) {
+	CPU test_cpu = {0};
+	cpu_write_csr(&test_cpu, CSR_MSTATUS, 0);      // MPP = U
+	TEST_ASSERT_EQUAL_UINT32(MSTATUS_MPP, cpu_read_csr(&test_cpu, CSR_MSTATUS) & MSTATUS_MPP);
+	cpu_write_csr(&test_cpu, CSR_MSTATUS, 0x800);  // MPP = S
+	TEST_ASSERT_EQUAL_UINT32(MSTATUS_MPP, cpu_read_csr(&test_cpu, CSR_MSTATUS) & MSTATUS_MPP);
+}
+
+void test_cpu_mstatus_other_bits_round_trip(void) {
+	CPU test_cpu = {0};
+	cpu_write_csr(&test_cpu, CSR_MSTATUS, MSTATUS_MIE | MSTATUS_MPIE);
+	TEST_ASSERT_EQUAL_UINT32(MSTATUS_MIE | MSTATUS_MPIE | MSTATUS_MPP, cpu_read_csr(&test_cpu, CSR_MSTATUS));
+}
+
 int main(void) {
 	UNITY_BEGIN();
 	RUN_TEST(test_cpu_write_read_roundtrip_x5);
@@ -121,6 +140,9 @@ int main(void) {
 	RUN_TEST(test_cpu_misa_writes_are_ignored);
 	RUN_TEST(test_cpu_id_csrs_read_zero);
 	RUN_TEST(test_cpu_trigger_csrs_are_hardwired_zero);
+	RUN_TEST(test_cpu_mstatus_mpp_is_m_from_reset);
+	RUN_TEST(test_cpu_mstatus_mpp_ignores_writes);
+	RUN_TEST(test_cpu_mstatus_other_bits_round_trip);
 	return UNITY_END();
 }
 
