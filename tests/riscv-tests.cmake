@@ -38,8 +38,6 @@ if(RISCV_TESTS)
     # A skipped test is still registered, as disabled, so it shows up in the
     # CTest output instead of silently vanishing. Remove the entry when the
     # feature lands.
-    set(RISCV_SKIP_rv32ui-p-fence_i
-        "FENCE.I is not implemented yet")
     set(RISCV_SKIP_rv32mi-p-illegal
         "mstatus.MPP is plain storage, so the test wrongly detects S-mode")
     set(RISCV_SKIP_rv32mi-p-zicntr
