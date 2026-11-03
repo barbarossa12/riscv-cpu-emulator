@@ -7,9 +7,11 @@
 typedef struct Memory {
 	uint8_t *buffer;
 	size_t size;
+	uint32_t base; // guest address of buffer[0]
 }Memory;
 
-void mem_init(Memory *mem, size_t size);
+void mem_init(Memory *mem, size_t size); // base = 0
+void mem_init_at(Memory *mem, uint32_t base, size_t size);
 void mem_free(Memory *mem);
 
 /*memory read functions*/
