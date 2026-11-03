@@ -386,6 +386,11 @@ static uint32_t execute_fence(CPU *cpu, Memory *mem, DecodedInstruction *instr, 
     switch (instr->funct3) {
         case 0x0:
             return pc + 4; // no-op: single-hart, in-order emulator
+        case 0x1:
+            // FENCE.I: no-op, there is no instruction cache and every fetch reads
+            // memory, so stores are always visible to later fetches. The spec says
+            // base implementations ignore funct12, rs1 and rd (zifencei.adoc).
+            return pc + 4;
         default:
             return trap_enter(cpu, pc, 2, instr->raw); // illegal instruction
     }
