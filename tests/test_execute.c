@@ -1895,6 +1895,55 @@ void test_fence_i_makes_stored_instruction_visible(void) {
     mem_free(&mem);
 }
 
+/* mstatus.MPP is WARL and holds only implemented modes; with M-mode alone it is always M. */
+void test_mstatus_mpp_probe_reads_back_m(void) {
+    /* The sequence riscv-tests illegal.S uses to detect S-mode: clear MPP, set MPP = S,
+     * read it back. A hart without S-mode must not report S. */
+    CPU cpu = {0};
+    Memory mem;
+    mem_init(&mem, 16);
+    mem_write32(&mem, 0, 0x3000B073); // CSRRC x0, mstatus, x1
+    mem_write32(&mem, 4, 0x3000A073); // CSRRS x0, mstatus, x1
+    mem_write32(&mem, 8, 0x30002173); // CSRRS x2, mstatus, x0
+
+    cpu_write_reg(&cpu, 1, MSTATUS_MPP);  // mask: clear both MPP bits
+    cpu_step(&cpu, &mem);
+    cpu_write_reg(&cpu, 1, 0x800);        // MPP = 01 (S)
+    cpu_step(&cpu, &mem);
+    cpu_step(&cpu, &mem);
+
+    TEST_ASSERT_EQUAL_UINT32(MSTATUS_MPP, cpu_read_reg(&cpu, 2) & MSTATUS_MPP); // 11, not 01
+    mem_free(&mem);
+}
+
+void test_mstatus_csrrw_cannot_clear_mpp(void) {
+    CPU cpu = {0};
+    Memory mem;
+    mem_init(&mem, 16);
+    mem_write32(&mem, 0, 0x30009073); // CSRRW x0, mstatus, x1
+    mem_write32(&mem, 4, 0x30002173); // CSRRS x2, mstatus, x0
+
+    cpu_write_reg(&cpu, 1, MSTATUS_MIE); // MIE set, MPP bits written as 00 (U)
+    cpu_step(&cpu, &mem);
+    cpu_step(&cpu, &mem);
+
+    TEST_ASSERT_EQUAL_UINT32(MSTATUS_MIE | MSTATUS_MPP, cpu_read_reg(&cpu, 2));
+    mem_free(&mem);
+}
+
+void test_mret_leaves_mpp_as_m(void) {
+    CPU cpu = {0};
+    Memory mem;
+    mem_init(&mem, 16);
+    cpu_write_csr(&cpu, CSR_MSTATUS, 0); // MPP written as U
+    mem_write32(&mem, 0, 0x30200073);    // MRET
+
+    cpu_step(&cpu, &mem);
+
+    TEST_ASSERT_EQUAL_UINT32(MSTATUS_MPP, cpu_read_csr(&cpu, CSR_MSTATUS) & MSTATUS_MPP);
+    mem_free(&mem);
+}
+
 void test_mret_returns_to_mepc(void) {
     CPU cpu = {0};
     Memory mem;
@@ -1923,7 +1972,7 @@ void test_mret_restores_mie_from_mpie(void) {
     DecodedInstruction instr = decode_instruction(raw);
     execute(&cpu, &mem, &instr);
 
-    TEST_ASSERT_EQUAL_UINT32(MSTATUS_MIE | MSTATUS_MPIE, cpu_read_csr(&cpu, CSR_MSTATUS));
+    TEST_ASSERT_EQUAL_UINT32(MSTATUS_MIE | MSTATUS_MPIE | MSTATUS_MPP, cpu_read_csr(&cpu, CSR_MSTATUS));
     mem_free(&mem);
 }
 
@@ -2066,6 +2115,9 @@ int main(void) {
     RUN_TEST(test_misc_mem_funct3_2_is_illegal);
     RUN_TEST(test_misc_mem_funct3_7_is_illegal);
     RUN_TEST(test_fence_i_makes_stored_instruction_visible);
+    RUN_TEST(test_mstatus_mpp_probe_reads_back_m);
+    RUN_TEST(test_mstatus_csrrw_cannot_clear_mpp);
+    RUN_TEST(test_mret_leaves_mpp_as_m);
     RUN_TEST(test_mret_returns_to_mepc);
     RUN_TEST(test_mret_restores_mie_from_mpie);
 	return UNITY_END();
