@@ -60,7 +60,8 @@ int main(int argc, char **argv) {
 		return EXIT_LOAD_ERROR;
 	}
 
-	CPU cpu = {0};
+	CPU cpu;
+	cpu_reset(&cpu);
 	cpu.pc = img.entry;
 
 	for (unsigned long long executed = 0; executed < max_instrs; executed++) {
