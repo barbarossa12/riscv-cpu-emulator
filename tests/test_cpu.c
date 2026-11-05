@@ -295,6 +295,136 @@ void test_cpu_test_helper_sets_requested_mode(void) {
 	TEST_ASSERT_EQUAL_INT(PRV_U, test_cpu.privilege_mode);
 }
 
+/* ---- S-mode CSRs ------------------------------------------------------------------------ */
+
+void test_cpu_sstatus_reads_the_s_view_of_mstatus(void) {
+	const struct { uint32_t mstatus, sstatus; } v[] = {
+		{0x00000008, 0x00000000}, // MIE
+		{0x00000002, 0x00000002}, // SIE
+		{0x00000020, 0x00000020}, // SPIE
+		{0x00000100, 0x00000100}, // SPP
+		{0x00001800, 0x00000000}, // MPP
+		{0x006219AA, 0x00000122}, // every writable mstatus bit
+	};
+	for (unsigned i = 0; i < sizeof v / sizeof v[0]; i++) {
+		CPU c; cpu_reset(&c);
+		cpu_write_csr(&c, CSR_MSTATUS, v[i].mstatus);
+		TEST_ASSERT_EQUAL_UINT32(v[i].sstatus, cpu_read_csr(&c, CSR_SSTATUS));
+	}
+}
+
+void test_cpu_sstatus_writes_touch_only_the_s_bits(void) {
+	CPU c; cpu_reset(&c);
+	cpu_write_csr(&c, CSR_MSTATUS, 0x1888);           // MIE, MPIE, MPP = M
+	cpu_write_csr(&c, CSR_SSTATUS, 0xFFFFFFFF);
+	TEST_ASSERT_EQUAL_UINT32(0x19AA, cpu_read_csr(&c, CSR_MSTATUS));
+	TEST_ASSERT_EQUAL_UINT32(0x0122, cpu_read_csr(&c, CSR_SSTATUS)); // SUM, MXR, FS, ... stay 0
+	cpu_write_csr(&c, CSR_SSTATUS, 0);
+	TEST_ASSERT_EQUAL_UINT32(0x1888, cpu_read_csr(&c, CSR_MSTATUS));
+}
+
+void test_cpu_mie_and_mip_keep_only_the_supervisor_bits(void) {
+	CPU c; cpu_reset(&c);
+	cpu_write_csr(&c, CSR_MIE, 0xFFFFFFFF);
+	cpu_write_csr(&c, CSR_MIP, 0xFFFFFFFF);
+	TEST_ASSERT_EQUAL_UINT32(0x222, cpu_read_csr(&c, CSR_MIE));
+	TEST_ASSERT_EQUAL_UINT32(0x222, cpu_read_csr(&c, CSR_MIP));
+	cpu_write_csr(&c, CSR_MIE, 0x888);                // MSIE, MTIE, MEIE: read-only 0 for now
+	cpu_write_csr(&c, CSR_MIP, 0x888);
+	TEST_ASSERT_EQUAL_UINT32(0, cpu_read_csr(&c, CSR_MIE));
+	TEST_ASSERT_EQUAL_UINT32(0, cpu_read_csr(&c, CSR_MIP));
+}
+
+void test_cpu_sie_and_sip_show_only_delegated_interrupts(void) {
+	const struct { uint32_t mideleg, visible; } v[] = {
+		{0x000, 0x000}, {0x002, 0x002}, {0x222, 0x222},
+	};
+	for (unsigned i = 0; i < sizeof v / sizeof v[0]; i++) {
+		CPU c; cpu_reset(&c);
+		cpu_write_csr(&c, CSR_MIE, 0x222);
+		cpu_write_csr(&c, CSR_MIP, 0x222);
+		c.csr[CSR_MIDELEG] = v[i].mideleg;            // the register itself arrives in step 4
+		TEST_ASSERT_EQUAL_UINT32(v[i].visible, cpu_read_csr(&c, CSR_SIE));
+		TEST_ASSERT_EQUAL_UINT32(v[i].visible, cpu_read_csr(&c, CSR_SIP));
+	}
+}
+
+void test_cpu_sie_writes_touch_only_delegated_bits(void) {
+	CPU c; cpu_reset(&c);
+	cpu_write_csr(&c, CSR_MIE, 0x200);                // SEIE
+	c.csr[CSR_MIDELEG] = 0x022;                       // SSI and STI delegated
+	cpu_write_csr(&c, CSR_SIE, 0xFFFFFFFF);
+	TEST_ASSERT_EQUAL_UINT32(0x222, cpu_read_csr(&c, CSR_MIE));
+	TEST_ASSERT_EQUAL_UINT32(0x022, cpu_read_csr(&c, CSR_SIE));
+	cpu_write_csr(&c, CSR_SIE, 0);
+	TEST_ASSERT_EQUAL_UINT32(0x200, cpu_read_csr(&c, CSR_MIE));
+
+	c.csr[CSR_MIDELEG] = 0;                           // nothing delegated
+	cpu_write_csr(&c, CSR_SIE, 0xFFFFFFFF);
+	TEST_ASSERT_EQUAL_UINT32(0x200, cpu_read_csr(&c, CSR_MIE));
+}
+
+void test_cpu_sip_writes_touch_only_ssip(void) {
+	CPU c; cpu_reset(&c);
+	cpu_write_csr(&c, CSR_MIP, 0x220);                // STIP, SEIP
+	c.csr[CSR_MIDELEG] = 0x222;
+	cpu_write_csr(&c, CSR_SIP, 0xFFFFFFFF);
+	TEST_ASSERT_EQUAL_UINT32(0x222, cpu_read_csr(&c, CSR_MIP)); // only SSIP changed
+	cpu_write_csr(&c, CSR_SIP, 0);
+	TEST_ASSERT_EQUAL_UINT32(0x220, cpu_read_csr(&c, CSR_MIP));
+
+	c.csr[CSR_MIDELEG] = 0;                           // not delegated: SSIP is not writable
+	cpu_write_csr(&c, CSR_SIP, 0xFFFFFFFF);
+	TEST_ASSERT_EQUAL_UINT32(0x220, cpu_read_csr(&c, CSR_MIP));
+}
+
+void test_cpu_stvec_and_sepc_drop_low_bits(void) {
+	const struct { uint16_t csr; uint32_t written, expected; } v[] = {
+		{CSR_STVEC, 0x80000003, 0x80000000},
+		{CSR_STVEC, 0x00001001, 0x00001000},
+		{CSR_SEPC,  0x80000003, 0x80000000},
+		{CSR_SEPC,  0xFFFFFFFF, 0xFFFFFFFC},
+	};
+	for (unsigned i = 0; i < sizeof v / sizeof v[0]; i++) {
+		CPU c; cpu_reset(&c);
+		cpu_write_csr(&c, v[i].csr, v[i].written);
+		TEST_ASSERT_EQUAL_UINT32(v[i].expected, cpu_read_csr(&c, v[i].csr));
+	}
+}
+
+void test_cpu_plain_s_registers_round_trip(void) {
+	const struct { uint16_t csr; uint32_t value; } v[] = {
+		{CSR_SSCRATCH, 0xDEADBEEF}, {CSR_SCAUSE, 0x8000001F}, {CSR_STVAL, 0x12345678},
+	};
+	for (unsigned i = 0; i < sizeof v / sizeof v[0]; i++) {
+		CPU c; cpu_reset(&c);
+		cpu_write_csr(&c, v[i].csr, v[i].value);
+		TEST_ASSERT_EQUAL_UINT32(v[i].value, cpu_read_csr(&c, v[i].csr));
+	}
+}
+
+void test_cpu_s_registers_are_independent_of_the_m_registers(void) {
+	const struct { uint16_t s, m; } pairs[] = {
+		{CSR_SEPC, CSR_MEPC}, {CSR_SCAUSE, CSR_MCAUSE}, {CSR_STVAL, CSR_MTVAL},
+		{CSR_SSCRATCH, CSR_MSCRATCH}, {CSR_STVEC, CSR_MTVEC},
+	};
+	for (unsigned i = 0; i < sizeof pairs / sizeof pairs[0]; i++) {
+		CPU c; cpu_reset(&c);
+		cpu_write_csr(&c, pairs[i].s, 0x100);
+		cpu_write_csr(&c, pairs[i].m, 0x200);
+		TEST_ASSERT_EQUAL_UINT32(0x100, cpu_read_csr(&c, pairs[i].s));
+		TEST_ASSERT_EQUAL_UINT32(0x200, cpu_read_csr(&c, pairs[i].m));
+	}
+}
+
+void test_cpu_satp_is_read_only_zero(void) {
+	CPU c; cpu_reset(&c);
+	cpu_write_csr(&c, CSR_SATP, 0xFFFFFFFF);
+	TEST_ASSERT_EQUAL_UINT32(0, cpu_read_csr(&c, CSR_SATP));
+	cpu_write_csr(&c, CSR_SATP, 0x80000000);          // MODE = Sv32 would be the next step
+	TEST_ASSERT_EQUAL_UINT32(0, cpu_read_csr(&c, CSR_SATP));
+}
+
 int main(void) {
 	UNITY_BEGIN();
 	RUN_TEST(test_cpu_write_read_roundtrip_x5);
@@ -311,6 +441,16 @@ int main(void) {
 	RUN_TEST(test_cpu_counteren_reads_zero_after_reset);
 	RUN_TEST(test_cpu_counteren_writable_bits);
 	RUN_TEST(test_cpu_counteren_registers_are_independent);
+	RUN_TEST(test_cpu_sstatus_reads_the_s_view_of_mstatus);
+	RUN_TEST(test_cpu_sstatus_writes_touch_only_the_s_bits);
+	RUN_TEST(test_cpu_mie_and_mip_keep_only_the_supervisor_bits);
+	RUN_TEST(test_cpu_sie_and_sip_show_only_delegated_interrupts);
+	RUN_TEST(test_cpu_sie_writes_touch_only_delegated_bits);
+	RUN_TEST(test_cpu_sip_writes_touch_only_ssip);
+	RUN_TEST(test_cpu_stvec_and_sepc_drop_low_bits);
+	RUN_TEST(test_cpu_plain_s_registers_round_trip);
+	RUN_TEST(test_cpu_s_registers_are_independent_of_the_m_registers);
+	RUN_TEST(test_cpu_satp_is_read_only_zero);
 	RUN_TEST(test_cpu_id_csrs_read_zero);
 	RUN_TEST(test_cpu_trigger_csrs_are_hardwired_zero);
 	RUN_TEST(test_cpu_mstatus_reads_zero_after_reset);
