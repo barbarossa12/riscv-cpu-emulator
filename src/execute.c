@@ -192,6 +192,20 @@ static uint32_t execute_auipc(CPU *cpu, Memory *mem, DecodedInstruction *instr, 
     return pc + 4;
 }
 
+// The privilege mode a load or store is checked at. With MPRV set it is MPP, not the current mode
+// (machine.adoc:3327). Fetches ignore MPRV.
+static PrivMode data_access_mode(CPU *cpu) {
+    uint32_t mstatus = cpu_read_csr(cpu, CSR_MSTATUS);
+    if (mstatus & MSTATUS_MPRV) {
+        return (PrivMode)((mstatus & MSTATUS_MPP) >> 11);
+    }
+    return cpu->privilege_mode;
+}
+
+static bool data_access_ok(CPU *cpu, uint32_t addr, uint32_t size, PmpAccess access) {
+    return pmp_check(cpu, addr, size, access, data_access_mode(cpu));
+}
+
 static uint32_t execute_load(CPU *cpu, Memory *mem, DecodedInstruction *instr, uint32_t pc) {
     switch(instr->funct3) {
         case 0x0: // LB
@@ -199,7 +213,7 @@ static uint32_t execute_load(CPU *cpu, Memory *mem, DecodedInstruction *instr, u
             uint32_t rs1_val = cpu_read_reg(cpu, instr->rs1);
             uint32_t addr = rs1_val + (uint32_t)instr->imm;
             uint8_t byte_val;
-            if (!mem_try_read8(mem, addr, &byte_val)) {
+            if (!data_access_ok(cpu, addr, 1, PMP_ACCESS_READ) || !mem_try_read8(mem, addr, &byte_val)) {
                 return trap_enter(cpu, pc, 5, addr); // load access fault
             }
             cpu_write_reg(cpu, instr->rd, (uint32_t)(int32_t)(int8_t)byte_val);  // sign-extend
@@ -210,7 +224,7 @@ static uint32_t execute_load(CPU *cpu, Memory *mem, DecodedInstruction *instr, u
             uint32_t rs1_val = cpu_read_reg(cpu, instr->rs1);
             uint32_t addr = rs1_val + (uint32_t)instr->imm;
             uint16_t half_val;
-            if (!mem_try_read16(mem, addr, &half_val)) {
+            if (!data_access_ok(cpu, addr, 2, PMP_ACCESS_READ) || !mem_try_read16(mem, addr, &half_val)) {
                 return trap_enter(cpu, pc, 5, addr); // load access fault
             }
             cpu_write_reg(cpu, instr->rd, (uint32_t)(int32_t)(int16_t)half_val); // sign extended
@@ -221,7 +235,7 @@ static uint32_t execute_load(CPU *cpu, Memory *mem, DecodedInstruction *instr, u
             uint32_t rs1_val = cpu_read_reg(cpu, instr->rs1);
             uint32_t addr = rs1_val + (uint32_t)instr->imm;
             uint32_t word;
-            if (!mem_try_read32(mem, addr, &word)) {
+            if (!data_access_ok(cpu, addr, 4, PMP_ACCESS_READ) || !mem_try_read32(mem, addr, &word)) {
                 return trap_enter(cpu, pc, 5, addr); // load access fault
             }
             cpu_write_reg(cpu, instr->rd, word);
@@ -232,7 +246,7 @@ static uint32_t execute_load(CPU *cpu, Memory *mem, DecodedInstruction *instr, u
             uint32_t rs1_val = cpu_read_reg(cpu, instr->rs1);
             uint32_t addr = rs1_val + (uint32_t)instr->imm;
             uint8_t byte_val;
-            if (!mem_try_read8(mem, addr, &byte_val)) {
+            if (!data_access_ok(cpu, addr, 1, PMP_ACCESS_READ) || !mem_try_read8(mem, addr, &byte_val)) {
                 return trap_enter(cpu, pc, 5, addr); // load access fault
             }
             cpu_write_reg(cpu, instr->rd, (uint32_t)byte_val);           // zero-extend
@@ -243,7 +257,7 @@ static uint32_t execute_load(CPU *cpu, Memory *mem, DecodedInstruction *instr, u
             uint32_t rs1_val = cpu_read_reg(cpu, instr->rs1);
             uint32_t addr = rs1_val + (uint32_t)instr->imm;
             uint16_t half_val;
-            if (!mem_try_read16(mem, addr, &half_val)) {
+            if (!data_access_ok(cpu, addr, 2, PMP_ACCESS_READ) || !mem_try_read16(mem, addr, &half_val)) {
                 return trap_enter(cpu, pc, 5, addr); // load access fault
             }
             cpu_write_reg(cpu, instr->rd, (uint32_t)half_val); //zero-extended
@@ -262,7 +276,7 @@ static uint32_t execute_store(CPU *cpu, Memory *mem, DecodedInstruction *instr, 
             uint32_t rs1_val = cpu_read_reg(cpu, instr->rs1);
             uint32_t addr = rs1_val + (uint32_t)instr->imm;
             uint32_t rs2_val = cpu_read_reg(cpu, instr->rs2);
-            if (!mem_try_write8(mem, addr, (uint8_t)rs2_val)) {
+            if (!data_access_ok(cpu, addr, 1, PMP_ACCESS_WRITE) || !mem_try_write8(mem, addr, (uint8_t)rs2_val)) {
                 return trap_enter(cpu, pc, 7, addr); // store/AMO access fault
             }
             return pc + 4;
@@ -272,7 +286,7 @@ static uint32_t execute_store(CPU *cpu, Memory *mem, DecodedInstruction *instr, 
             uint32_t rs1_val = cpu_read_reg(cpu, instr->rs1);
             uint32_t addr = rs1_val + (uint32_t)instr->imm;
             uint32_t rs2_val = cpu_read_reg(cpu, instr->rs2);
-            if (!mem_try_write16(mem, addr, (uint16_t)rs2_val)) {
+            if (!data_access_ok(cpu, addr, 2, PMP_ACCESS_WRITE) || !mem_try_write16(mem, addr, (uint16_t)rs2_val)) {
                 return trap_enter(cpu, pc, 7, addr); // store/AMO access fault
             }
             return pc + 4;
@@ -282,7 +296,7 @@ static uint32_t execute_store(CPU *cpu, Memory *mem, DecodedInstruction *instr, 
             uint32_t rs1_val = cpu_read_reg(cpu, instr->rs1);
             uint32_t addr = rs1_val + (uint32_t)instr->imm;
             uint32_t rs2_val = cpu_read_reg(cpu, instr->rs2);
-            if (!mem_try_write32(mem, addr, rs2_val)) {
+            if (!data_access_ok(cpu, addr, 4, PMP_ACCESS_WRITE) || !mem_try_write32(mem, addr, rs2_val)) {
                 return trap_enter(cpu, pc, 7, addr); // store/AMO access fault
             }
             return pc + 4;
@@ -706,7 +720,8 @@ void cpu_step(CPU *cpu, Memory *mem) {
     cpu->minstret_written = false;
 
     uint32_t raw;
-    if (!mem_try_read32(mem, cpu->pc, &raw)) {
+    if (!pmp_check(cpu, cpu->pc, 4, PMP_ACCESS_EXEC, cpu->privilege_mode) ||
+        !mem_try_read32(mem, cpu->pc, &raw)) {
         cpu->pc = trap_enter(cpu, cpu->pc, 1, cpu->pc); // instruction access fault
     } else {
         DecodedInstruction instr = decode_instruction(raw);
