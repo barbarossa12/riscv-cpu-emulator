@@ -2038,6 +2038,75 @@ void test_round_trip_u_to_m_and_back(void) {
     TEST_ASSERT_EQUAL_UINT32(0x80, cpu_read_csr(&cpu, CSR_MSTATUS));   // MPIE = 1, MPP = U
 }
 
+/* ---- PMP CSRs through instructions ------------------------------------------------------- */
+
+#define CSRRW_PMPCFG0_X1   0x3A009073u   /* CSRRW x0, pmpcfg0, x1 */
+#define CSRRS_PMPCFG0_X1   0x3A00A073u   /* CSRRS x0, pmpcfg0, x1 */
+#define CSRRC_PMPCFG0_X1   0x3A00B073u   /* CSRRC x0, pmpcfg0, x1 */
+#define CSRRW_PMPADDR0_X1  0x3B009073u   /* CSRRW x0, pmpaddr0, x1 */
+#define CSRR_X2_PMPADDR0   0x3B002173u   /* CSRRS x2, pmpaddr0, x0 */
+
+/* All 80 PMP CSRs (pmpcfg0-15, pmpaddr0-63) exist and need M-mode. */
+void test_pmp_csrs_exist_and_are_m_only(void) {
+    for (unsigned csr = 0x3A0; csr <= 0x3EF; csr++) {
+        uint32_t enc = ((uint32_t)csr << 20) | 0x2173;       /* CSRRS x2, csr, x0 */
+        assert_csr_traps(PRV_M, 0, 0, enc, false, "pmp csr from M");
+        assert_csr_traps(PRV_S, 0, 0, enc, true,  "pmp csr from S");
+        assert_csr_traps(PRV_U, 0, 0, enc, true,  "pmp csr from U");
+    }
+}
+
+void test_csrs_next_to_the_pmp_range_do_not_exist(void) {
+    assert_csr_traps(PRV_M, 0, 0, (0x39Fu << 20) | 0x2173, true, "0x39F");
+    assert_csr_traps(PRV_M, 0, 0, (0x3F0u << 20) | 0x2173, true, "0x3F0");
+}
+
+/* The sequence the riscv-tests harness (INIT_PMP) runs. */
+void test_pmp_harness_sequence_is_accepted(void) {
+    CPU cpu; cpu_reset(&cpu);
+    cpu_write_reg(&cpu, 1, 0x7FFFFFFF);
+    run_on(&cpu, CSRRW_PMPADDR0_X1);
+    TEST_ASSERT_EQUAL_UINT32(4, cpu.pc);                       // no trap
+    cpu_write_reg(&cpu, 1, 0x1F);                              // NAPOT | R | W | X
+    run_on(&cpu, CSRRW_PMPCFG0_X1);
+    TEST_ASSERT_EQUAL_UINT32(4, cpu.pc);
+    TEST_ASSERT_EQUAL_UINT32(0x7FFFFFFF, cpu_read_csr(&cpu, CSR_PMPADDR0));
+    TEST_ASSERT_EQUAL_UINT32(0x1F, cpu_read_csr(&cpu, CSR_PMPCFG0));
+}
+
+/* CSRRS and CSRRC compute a new value from the old one, and a reserved result keeps the old RWX. */
+void test_pmpcfg_read_modify_write_applies_the_warl_rule(void) {
+    CPU cpu; cpu_reset(&cpu);
+    cpu_write_csr(&cpu, CSR_PMPCFG0, 0x01);                    // R
+    cpu_write_reg(&cpu, 1, 0x02);
+    run_on(&cpu, CSRRS_PMPCFG0_X1);                            // 0x01 | 0x02 = 0x03: RW, legal
+    TEST_ASSERT_EQUAL_UINT32(0x03, cpu_read_csr(&cpu, CSR_PMPCFG0));
+    cpu_write_reg(&cpu, 1, 0x01);
+    run_on(&cpu, CSRRC_PMPCFG0_X1);                            // 0x03 & ~0x01 = 0x02: W only, reserved
+    TEST_ASSERT_EQUAL_UINT32(0x03, cpu_read_csr(&cpu, CSR_PMPCFG0));   // RWX keeps its old value
+}
+
+void test_pmp_locking_through_instructions(void) {
+    CPU cpu; cpu_reset(&cpu);
+    cpu_write_reg(&cpu, 1, 0x80);
+    run_on(&cpu, CSRRS_PMPCFG0_X1);                            // set L
+    TEST_ASSERT_EQUAL_UINT32(0x80, cpu_read_csr(&cpu, CSR_PMPCFG0));
+    cpu_write_reg(&cpu, 1, 0x1F);
+    run_on(&cpu, CSRRW_PMPCFG0_X1);                            // locked: ignored
+    TEST_ASSERT_EQUAL_UINT32(0x80, cpu_read_csr(&cpu, CSR_PMPCFG0));
+    cpu_write_reg(&cpu, 1, 0x1234);
+    run_on(&cpu, CSRRW_PMPADDR0_X1);                           // locked: ignored
+    TEST_ASSERT_EQUAL_UINT32(0, cpu_read_csr(&cpu, CSR_PMPADDR0));
+}
+
+void test_pmpaddr_all_ones_reads_back(void) {
+    CPU cpu; cpu_reset(&cpu);
+    cpu_write_reg(&cpu, 1, 0xFFFFFFFF);
+    run_on(&cpu, CSRRW_PMPADDR0_X1);
+    run_on(&cpu, CSRR_X2_PMPADDR0);
+    TEST_ASSERT_EQUAL_UINT32(0xFFFFFFFF, cpu_read_reg(&cpu, 2));
+}
+
 /* Read-only CSR addresses (csr[11:10] == 0b11), here 0xF14 (mhartid) */
 void test_csrrw_read_only_csr_traps(void) {
     assert_csr_access_illegal(0xF1409073, 0xF14, 7); // CSRRW x0, mhartid, x1
@@ -3036,6 +3105,12 @@ int main(void) {
     RUN_TEST(test_round_trip_u_to_s_and_back);
     RUN_TEST(test_round_trip_s_to_s);
     RUN_TEST(test_round_trip_u_to_m_and_back);
+    RUN_TEST(test_pmp_csrs_exist_and_are_m_only);
+    RUN_TEST(test_csrs_next_to_the_pmp_range_do_not_exist);
+    RUN_TEST(test_pmp_harness_sequence_is_accepted);
+    RUN_TEST(test_pmpcfg_read_modify_write_applies_the_warl_rule);
+    RUN_TEST(test_pmp_locking_through_instructions);
+    RUN_TEST(test_pmpaddr_all_ones_reads_back);
     RUN_TEST(test_csrr_misa_reports_rv32ius);
     RUN_TEST(test_csrr_tdata1_reads_zero);
     RUN_TEST(test_tdata1_write_does_not_read_back);
