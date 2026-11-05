@@ -1,3 +1,4 @@
+#include <stdio.h>
 #include "unity.h"
 #include "../src/pmp.h"
 
@@ -107,6 +108,170 @@ void test_pmp_entry_range_beyond_the_implemented_entries_is_none(void) {
     TEST_ASSERT_FALSE(pmp_entry_range(&c, 63, &r));
 }
 
+/* ---- pmp_check ---------------------------------------------------------------------------- */
+
+#define CFG_NAPOT 0x18u
+#define CFG_TOR   0x08u
+#define CFG_NA4   0x10u
+#define CFG_L     0x80u
+
+/* pmpaddr for a NAPOT region [base, base + size), size a power of two >= 8 */
+static uint32_t napot(uint32_t base, uint32_t size) {
+    return (base >> 2) | ((size >> 3) - 1);
+}
+
+static void set_entry(CPU *c, unsigned i, uint8_t cfg, uint32_t addr) {
+    c->pmpcfg[i] = cfg;
+    c->pmpaddr[i] = addr;
+}
+
+static const PmpAccess ALL_ACCESSES[] = {PMP_ACCESS_READ, PMP_ACCESS_WRITE, PMP_ACCESS_EXEC};
+static const PrivMode  ALL_MODES[]    = {PRV_U, PRV_S, PRV_M};
+
+static bool allowed(const CPU *c, uint32_t addr, uint32_t size, PmpAccess a, PrivMode m) {
+    return pmp_check(c, addr, size, a, m);
+}
+
+void test_pmp_check_with_no_entries(void) {
+    CPU c; cpu_reset(&c);
+    const uint32_t sizes[] = {1, 2, 4};
+    for (unsigned s = 0; s < 3; s++) {
+        for (unsigned a = 0; a < 3; a++) {
+            TEST_ASSERT_TRUE(allowed(&c, 0x1000, sizes[s], ALL_ACCESSES[a], PRV_M));   // M succeeds
+            TEST_ASSERT_FALSE(allowed(&c, 0x1000, sizes[s], ALL_ACCESSES[a], PRV_S));  // S and U fail
+            TEST_ASSERT_FALSE(allowed(&c, 0x1000, sizes[s], ALL_ACCESSES[a], PRV_U));
+        }
+    }
+}
+
+/* One NAPOT region [0x1000, 0x2000); an access of 4 bytes at 0x1000, inside it. */
+void test_pmp_check_explicit_permission_rows(void) {
+    const struct { uint8_t perms_and_l; PrivMode mode; PmpAccess access; bool ok; const char *why; } v[] = {
+        {0x01, PRV_U, PMP_ACCESS_READ,  true,  "R: U reads"},
+        {0x01, PRV_U, PMP_ACCESS_WRITE, false, "R: U cannot write"},
+        {0x01, PRV_U, PMP_ACCESS_EXEC,  false, "R: U cannot execute"},
+        {0x04, PRV_S, PMP_ACCESS_EXEC,  true,  "X: S executes"},
+        {0x04, PRV_S, PMP_ACCESS_READ,  false, "X: S cannot read"},
+        {0x03, PRV_U, PMP_ACCESS_WRITE, true,  "RW: U writes"},
+        {0x03, PRV_U, PMP_ACCESS_EXEC,  false, "RW: U cannot execute"},
+        {0x01, PRV_M, PMP_ACCESS_WRITE, true,  "L clear: M ignores the permissions"},
+        {0x00, PRV_M, PMP_ACCESS_READ,  true,  "L clear, no permissions: M still reads"},
+        {0x81, PRV_M, PMP_ACCESS_READ,  true,  "L set, R: M reads"},
+        {0x81, PRV_M, PMP_ACCESS_WRITE, false, "L set, R: M cannot write"},
+        {0x80, PRV_M, PMP_ACCESS_READ,  false, "L set, no permissions: M cannot read"},
+    };
+    for (unsigned i = 0; i < sizeof v / sizeof v[0]; i++) {
+        CPU c; cpu_reset(&c);
+        set_entry(&c, 0, CFG_NAPOT | v[i].perms_and_l, napot(0x1000, 0x1000));
+        TEST_ASSERT_EQUAL_INT_MESSAGE(v[i].ok, allowed(&c, 0x1000, 4, v[i].access, v[i].mode), v[i].why);
+    }
+}
+
+/* Every legal permission set (the reserved W-only sets are skipped), every access, mode and L. */
+void test_pmp_check_every_permission_combination(void) {
+    const uint8_t perms[] = {0x0, 0x1, 0x3, 0x4, 0x5, 0x7};
+    const uint8_t bit_of[] = {0x1, 0x2, 0x4};                 /* read, write, execute */
+    for (unsigned p = 0; p < 6; p++) {
+        for (unsigned l = 0; l < 2; l++) {
+            CPU c; cpu_reset(&c);
+            set_entry(&c, 0, CFG_NAPOT | perms[p] | (l ? CFG_L : 0), napot(0x1000, 0x1000));
+            for (unsigned m = 0; m < 3; m++) {
+                for (unsigned a = 0; a < 3; a++) {
+                    bool expected = (ALL_MODES[m] == PRV_M && !l) || (perms[p] & bit_of[a]);
+                    char msg[64];
+                    snprintf(msg, sizeof msg, "perms 0x%x L %u mode %d access %u", perms[p], l, (int)ALL_MODES[m], a);
+                    TEST_ASSERT_EQUAL_INT_MESSAGE(expected, allowed(&c, 0x1000, 4, ALL_ACCESSES[a], ALL_MODES[m]), msg);
+                }
+            }
+        }
+    }
+}
+
+/* Region [0x1000, 0x2000) with RWX, reads. A partial match fails for every mode, M with L clear too. */
+void test_pmp_check_region_boundaries(void) {
+    const struct { const char *name; uint32_t addr, size; bool user, machine; } v[] = {
+        {"start",                 0x1000, 4, true,  true },
+        {"ends exactly at the top", 0x1FFC, 4, true,  true },
+        {"last byte",             0x1FFF, 1, true,  true },
+        {"partial: past the top", 0x1FFD, 4, false, false},
+        {"partial: below the base", 0x0FFD, 4, false, false},
+        {"2 bytes from the last byte", 0x1FFF, 2, false, false},
+        {"just below, no match",  0x0FFC, 4, false, true },
+        {"byte after, no match",  0x2000, 1, false, true },
+    };
+    CPU c; cpu_reset(&c);
+    set_entry(&c, 0, CFG_NAPOT | PMP_RWX, napot(0x1000, 0x1000));
+    for (unsigned i = 0; i < sizeof v / sizeof v[0]; i++) {
+        TEST_ASSERT_EQUAL_INT_MESSAGE(v[i].user,    allowed(&c, v[i].addr, v[i].size, PMP_ACCESS_READ, PRV_U), v[i].name);
+        TEST_ASSERT_EQUAL_INT_MESSAGE(v[i].user,    allowed(&c, v[i].addr, v[i].size, PMP_ACCESS_READ, PRV_S), v[i].name);
+        TEST_ASSERT_EQUAL_INT_MESSAGE(v[i].machine, allowed(&c, v[i].addr, v[i].size, PMP_ACCESS_READ, PRV_M), v[i].name);
+    }
+}
+
+void test_pmp_check_lowest_entry_wins(void) {
+    CPU c; cpu_reset(&c);
+    set_entry(&c, 0, CFG_NA4 | 0x00, 0x1000 >> 2);                       /* NA4 at 0x1000, no permissions */
+    set_entry(&c, 1, CFG_NAPOT | PMP_RWX, napot(0x1000, 0x1000));        /* the whole page, RWX */
+    TEST_ASSERT_FALSE(allowed(&c, 0x1000, 4, PMP_ACCESS_READ, PRV_U));   /* entry 0 decides: denied */
+    TEST_ASSERT_TRUE (allowed(&c, 0x1004, 4, PMP_ACCESS_READ, PRV_U));   /* entry 0 does not match; entry 1 allows */
+    TEST_ASSERT_FALSE(allowed(&c, 0x1000, 8, PMP_ACCESS_READ, PRV_U));   /* entry 0 matches part: denied, though entry 1 covers all */
+
+    CPU d; cpu_reset(&d);
+    set_entry(&d, 0, CFG_NA4 | PMP_RWX, 0x1000 >> 2);                    /* NA4 at 0x1000, RWX */
+    set_entry(&d, 1, CFG_NAPOT | 0x00, napot(0x1000, 0x1000));           /* the whole page, no permissions */
+    TEST_ASSERT_TRUE (allowed(&d, 0x1000, 4, PMP_ACCESS_READ, PRV_U));   /* entry 0 allows */
+    TEST_ASSERT_FALSE(allowed(&d, 0x1004, 4, PMP_ACCESS_READ, PRV_U));   /* entry 1 denies */
+}
+
+void test_pmp_check_disabled_and_empty_entries_do_not_match(void) {
+    CPU c; cpu_reset(&c);
+    set_entry(&c, 0, 0x00 | PMP_RWX, napot(0x1000, 0x1000));             /* OFF: address set, permissions set */
+    set_entry(&c, 1, CFG_NAPOT | PMP_RWX, napot(0x1000, 0x1000));
+    TEST_ASSERT_TRUE(allowed(&c, 0x1000, 4, PMP_ACCESS_WRITE, PRV_U));
+
+    CPU d; cpu_reset(&d);
+    set_entry(&d, 0, CFG_TOR | PMP_RWX, 0);                              /* TOR with top 0: empty */
+    TEST_ASSERT_FALSE(allowed(&d, 0x0, 4, PMP_ACCESS_READ, PRV_U));      /* no match: U denied */
+}
+
+void test_pmp_check_tor_regions(void) {
+    CPU c; cpu_reset(&c);
+    set_entry(&c, 0, CFG_TOR | PMP_R, 0x400);                            /* [0, 0x1000), read only */
+    set_entry(&c, 1, CFG_TOR | PMP_R | PMP_W, 0x800);                    /* [0x1000, 0x2000), read and write */
+    TEST_ASSERT_TRUE (allowed(&c, 0xFFC,  4, PMP_ACCESS_READ,  PRV_U));
+    TEST_ASSERT_FALSE(allowed(&c, 0xFFC,  4, PMP_ACCESS_WRITE, PRV_U));
+    TEST_ASSERT_TRUE (allowed(&c, 0x1000, 4, PMP_ACCESS_WRITE, PRV_U));
+    /* straddles both: entry 0 matches first but not all, so it fails although both allow a read */
+    TEST_ASSERT_FALSE(allowed(&c, 0xFFE, 4, PMP_ACCESS_READ, PRV_U));
+}
+
+void test_pmp_check_access_types_stay_separate(void) {
+    CPU c; cpu_reset(&c);
+    set_entry(&c, 0, CFG_NAPOT | PMP_X, napot(0x1000, 0x1000));
+    const PrivMode lower[] = {PRV_S, PRV_U};
+    for (unsigned m = 0; m < 2; m++) {
+        TEST_ASSERT_TRUE (allowed(&c, 0x1000, 4, PMP_ACCESS_EXEC,  lower[m]));
+        TEST_ASSERT_FALSE(allowed(&c, 0x1000, 4, PMP_ACCESS_READ,  lower[m]));
+        TEST_ASSERT_FALSE(allowed(&c, 0x1000, 4, PMP_ACCESS_WRITE, lower[m]));
+    }
+}
+
+void test_pmp_check_high_addresses(void) {
+    CPU c; cpu_reset(&c);
+    set_entry(&c, 0, CFG_NAPOT | PMP_RWX, napot(0x80000000u, 0x10000));
+    TEST_ASSERT_TRUE (allowed(&c, 0x80000000u, 4, PMP_ACCESS_READ, PRV_U));
+    TEST_ASSERT_TRUE (allowed(&c, 0x8000FFFCu, 4, PMP_ACCESS_READ, PRV_U));
+    TEST_ASSERT_FALSE(allowed(&c, 0x80010000u, 4, PMP_ACCESS_READ, PRV_U));
+
+    /* the riscv-tests harness entry: NAPOT, RWX, [0, 2^34) */
+    CPU h; cpu_reset(&h);
+    set_entry(&h, 0, 0x1F, 0x7FFFFFFF);
+    TEST_ASSERT_TRUE(allowed(&h, 0xFFFFFFFCu, 4, PMP_ACCESS_READ, PRV_U));
+    TEST_ASSERT_TRUE(allowed(&h, 0xFFFFFFFEu, 4, PMP_ACCESS_READ, PRV_U));   /* reaches 0x100000002 */
+    CPU n; cpu_reset(&n);
+    TEST_ASSERT_FALSE(allowed(&n, 0xFFFFFFFEu, 4, PMP_ACCESS_READ, PRV_U));  /* no entry: denied */
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_pmp_range_table);
@@ -115,5 +280,14 @@ int main(void) {
     RUN_TEST(test_pmp_entry_15_tor_uses_pmpaddr14);
     RUN_TEST(test_pmp_entry_range_of_an_off_entry_is_none);
     RUN_TEST(test_pmp_entry_range_beyond_the_implemented_entries_is_none);
+    RUN_TEST(test_pmp_check_with_no_entries);
+    RUN_TEST(test_pmp_check_explicit_permission_rows);
+    RUN_TEST(test_pmp_check_every_permission_combination);
+    RUN_TEST(test_pmp_check_region_boundaries);
+    RUN_TEST(test_pmp_check_lowest_entry_wins);
+    RUN_TEST(test_pmp_check_disabled_and_empty_entries_do_not_match);
+    RUN_TEST(test_pmp_check_tor_regions);
+    RUN_TEST(test_pmp_check_access_types_stay_separate);
+    RUN_TEST(test_pmp_check_high_addresses);
     return UNITY_END();
 }
