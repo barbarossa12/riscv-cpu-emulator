@@ -1264,11 +1264,11 @@ static void assert_illegal_instruction(uint32_t encoding) {
 }
 
 void test_illegal_op_funct7_in_add_slot(void) {
-    assert_illegal_instruction(0x022081B3); // MUL x3, x1, x2: funct7=0x01, funct3=0
+    assert_illegal_instruction(0x042081B3); // funct7=0x02, funct3=0 (funct7=0x01 is MUL since the M extension)
 }
 
 void test_illegal_op_funct7_in_sll_slot(void) {
-    assert_illegal_instruction(0x020091B3); // MULH x3, x1, x2: funct7=0x01, funct3=1
+    assert_illegal_instruction(0x042091B3); // funct7=0x02, funct3=1 (funct7=0x01 is MULH since the M extension)
 }
 
 void test_illegal_op_alt_funct7_in_slt_slot(void) {
@@ -2365,6 +2365,124 @@ void test_pmp_harness_entry_allows_u(void) {
     mem_free(&mem);
 }
 
+/* ---- M extension: multiply and divide ----------------------------------------------------- */
+
+#define MUL_X1_X2_X3     0x023100B3u
+#define MULH_X1_X2_X3    0x023110B3u
+#define MULHSU_X1_X2_X3  0x023120B3u
+#define MULHU_X1_X2_X3   0x023130B3u
+#define DIV_X1_X2_X3     0x023140B3u
+#define DIVU_X1_X2_X3    0x023150B3u
+#define REM_X1_X2_X3     0x023160B3u
+#define REMU_X1_X2_X3    0x023170B3u
+
+/* x1 = op x2, x3 with x2 = a and x3 = b, on a CPU in `mode`. Returns x1 and checks nothing else moved. */
+static uint32_t run_muldiv_in(PrivMode mode, uint32_t raw, uint32_t a, uint32_t b) {
+    CPU cpu; test_cpu_reset_in_mode(&cpu, mode);
+    cpu_write_csr(&cpu, CSR_MCAUSE, 0x77);
+    cpu_write_reg(&cpu, 1, 0xDEADBEEF);
+    cpu_write_reg(&cpu, 2, a);
+    cpu_write_reg(&cpu, 3, b);
+    run_on(&cpu, raw);
+    TEST_ASSERT_EQUAL_UINT32(4, cpu.pc);                          /* no trap, whatever the operands */
+    TEST_ASSERT_EQUAL_UINT32(0x77, cpu_read_csr(&cpu, CSR_MCAUSE));
+    TEST_ASSERT_EQUAL_UINT32(a, cpu_read_reg(&cpu, 2));           /* the sources are untouched */
+    TEST_ASSERT_EQUAL_UINT32(b, cpu_read_reg(&cpu, 3));
+    return cpu_read_reg(&cpu, 1);
+}
+
+static uint32_t run_muldiv(uint32_t raw, uint32_t a, uint32_t b) {
+    return run_muldiv_in(PRV_M, raw, a, b);
+}
+
+void test_m_multiplies(void) {
+    const struct { uint32_t a, b, mul, mulh, mulhsu, mulhu; } v[] = {
+        {0x00000003, 0x00000004, 0x0000000C, 0x00000000, 0x00000000, 0x00000000},
+        {0xFFFFFFFF, 0xFFFFFFFF, 0x00000001, 0x00000000, 0xFFFFFFFF, 0xFFFFFFFE},
+        {0x80000000, 0x80000000, 0x00000000, 0x40000000, 0xC0000000, 0x40000000},
+        {0x80000000, 0x00000002, 0x00000000, 0xFFFFFFFF, 0xFFFFFFFF, 0x00000001},
+        {0x7FFFFFFF, 0x7FFFFFFF, 0x00000001, 0x3FFFFFFF, 0x3FFFFFFF, 0x3FFFFFFF},
+        {0xFFFFFFFF, 0x00000001, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0x00000000},
+        {0x80000000, 0xFFFFFFFF, 0x80000000, 0x00000000, 0x80000000, 0x7FFFFFFF},
+        {0x7FFFFFFF, 0xFFFFFFFF, 0x80000001, 0xFFFFFFFF, 0x7FFFFFFE, 0x7FFFFFFE},
+    };
+    for (unsigned i = 0; i < sizeof v / sizeof v[0]; i++) {
+        char msg[48];
+        snprintf(msg, sizeof msg, "row %u: a=0x%08x b=0x%08x", i, v[i].a, v[i].b);
+        TEST_ASSERT_EQUAL_HEX32_MESSAGE(v[i].mul,    run_muldiv(MUL_X1_X2_X3,    v[i].a, v[i].b), msg);
+        TEST_ASSERT_EQUAL_HEX32_MESSAGE(v[i].mulh,   run_muldiv(MULH_X1_X2_X3,   v[i].a, v[i].b), msg);
+        TEST_ASSERT_EQUAL_HEX32_MESSAGE(v[i].mulhsu, run_muldiv(MULHSU_X1_X2_X3, v[i].a, v[i].b), msg);
+        TEST_ASSERT_EQUAL_HEX32_MESSAGE(v[i].mulhu,  run_muldiv(MULHU_X1_X2_X3,  v[i].a, v[i].b), msg);
+    }
+}
+
+void test_m_divisions(void) {
+    const struct { uint32_t a, b, div, divu, rem, remu; } v[] = {
+        {0x00000014, 0x00000006, 0x00000003, 0x00000003, 0x00000002, 0x00000002},
+        {0xFFFFFFEC, 0x00000006, 0xFFFFFFFD, 0x2AAAAAA7, 0xFFFFFFFE, 0x00000002},   /* -20 / 6 */
+        {0x00000014, 0xFFFFFFFA, 0xFFFFFFFD, 0x00000000, 0x00000002, 0x00000014},   /* 20 / -6 */
+        {0xFFFFFFEC, 0xFFFFFFFA, 0x00000003, 0x00000000, 0xFFFFFFFE, 0xFFFFFFEC},   /* -20 / -6 */
+        {0x00000007, 0x00000000, 0xFFFFFFFF, 0xFFFFFFFF, 0x00000007, 0x00000007},   /* divide by zero */
+        {0xFFFFFFF9, 0x00000000, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFF9, 0xFFFFFFF9},   /* -7 / 0 */
+        {0x80000000, 0xFFFFFFFF, 0x80000000, 0x00000000, 0x00000000, 0x80000000},   /* signed overflow */
+        {0x80000000, 0x00000001, 0x80000000, 0x80000000, 0x00000000, 0x00000000},
+        {0x00000000, 0x00000000, 0xFFFFFFFF, 0xFFFFFFFF, 0x00000000, 0x00000000},   /* 0 / 0 */
+    };
+    for (unsigned i = 0; i < sizeof v / sizeof v[0]; i++) {
+        char msg[48];
+        snprintf(msg, sizeof msg, "row %u: a=0x%08x b=0x%08x", i, v[i].a, v[i].b);
+        TEST_ASSERT_EQUAL_HEX32_MESSAGE(v[i].div,  run_muldiv(DIV_X1_X2_X3,  v[i].a, v[i].b), msg);
+        TEST_ASSERT_EQUAL_HEX32_MESSAGE(v[i].divu, run_muldiv(DIVU_X1_X2_X3, v[i].a, v[i].b), msg);
+        TEST_ASSERT_EQUAL_HEX32_MESSAGE(v[i].rem,  run_muldiv(REM_X1_X2_X3,  v[i].a, v[i].b), msg);
+        TEST_ASSERT_EQUAL_HEX32_MESSAGE(v[i].remu, run_muldiv(REMU_X1_X2_X3, v[i].a, v[i].b), msg);
+    }
+}
+
+void test_m_works_in_every_mode(void) {
+    const PrivMode modes[] = {PRV_U, PRV_S, PRV_M};
+    for (unsigned m = 0; m < 3; m++) {
+        TEST_ASSERT_EQUAL_HEX32(0x0000000C, run_muldiv_in(modes[m], MUL_X1_X2_X3, 3, 4));
+        TEST_ASSERT_EQUAL_HEX32(0x00000003, run_muldiv_in(modes[m], DIV_X1_X2_X3, 20, 6));
+    }
+}
+
+void test_m_register_aliasing_and_x0(void) {
+    CPU cpu; cpu_reset(&cpu);
+    cpu_write_reg(&cpu, 1, 7);
+    run_on(&cpu, 0x021080B3);                                     /* MUL x1, x1, x1 */
+    TEST_ASSERT_EQUAL_UINT32(49, cpu_read_reg(&cpu, 1));
+
+    cpu_reset(&cpu);
+    cpu_write_reg(&cpu, 2, 20);
+    cpu_write_reg(&cpu, 3, 6);
+    run_on(&cpu, 0x02314133);                                     /* DIV x2, x2, x3: rd is also a source */
+    TEST_ASSERT_EQUAL_UINT32(3, cpu_read_reg(&cpu, 2));
+
+    cpu_reset(&cpu);
+    cpu_write_reg(&cpu, 2, 3);
+    cpu_write_reg(&cpu, 3, 4);
+    run_on(&cpu, 0x02310033);                                     /* MUL x0, x2, x3 */
+    TEST_ASSERT_EQUAL_UINT32(0, cpu_read_reg(&cpu, 0));
+}
+
+void test_m_instruction_retires(void) {
+    CPU cpu; cpu_reset(&cpu);
+    cpu_write_reg(&cpu, 2, 3);
+    cpu_write_reg(&cpu, 3, 4);
+    Memory mem;
+    mem_init(&mem, 64);
+    mem_write32(&mem, 0, MUL_X1_X2_X3);
+    cpu_step(&cpu, &mem);
+    TEST_ASSERT_EQUAL_UINT32(12, cpu_read_reg(&cpu, 1));
+    TEST_ASSERT_EQUAL_UINT64(1, cpu.minstret);
+    mem_free(&mem);
+}
+
+void test_m_reserved_funct7_still_traps(void) {
+    assert_illegal_instruction(0x4220A1B3);                       /* funct7=0x21, funct3=2 */
+    assert_illegal_instruction(0x462091B3);                       /* funct7=0x23, funct3=1 */
+}
+
 /* Read-only CSR addresses (csr[11:10] == 0b11), here 0xF14 (mhartid) */
 void test_csrrw_read_only_csr_traps(void) {
     assert_csr_access_illegal(0xF1409073, 0xF14, 7); // CSRRW x0, mhartid, x1
@@ -2519,7 +2637,7 @@ void test_csr_read_every_implemented_csr_does_not_trap(void) {
     }
 }
 
-void test_csrr_misa_reports_rv32ius(void) {
+void test_csrr_misa_reports_the_implemented_extensions(void) {
     assert_csr_read_ok(0x30102173, CSR_MISA, MISA_VALUE); // CSRRS x2, misa, x0
 }
 
@@ -3377,7 +3495,13 @@ int main(void) {
     RUN_TEST(test_pmp_mprv);
     RUN_TEST(test_pmp_fault_delegated_to_s);
     RUN_TEST(test_pmp_harness_entry_allows_u);
-    RUN_TEST(test_csrr_misa_reports_rv32ius);
+    RUN_TEST(test_m_multiplies);
+    RUN_TEST(test_m_divisions);
+    RUN_TEST(test_m_works_in_every_mode);
+    RUN_TEST(test_m_register_aliasing_and_x0);
+    RUN_TEST(test_m_instruction_retires);
+    RUN_TEST(test_m_reserved_funct7_still_traps);
+    RUN_TEST(test_csrr_misa_reports_the_implemented_extensions);
     RUN_TEST(test_csrr_tdata1_reads_zero);
     RUN_TEST(test_tdata1_write_does_not_read_back);
     RUN_TEST(test_cpu_step_executes_fetched_instruction);
