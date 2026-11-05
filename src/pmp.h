@@ -36,3 +36,13 @@ bool pmp_range(uint8_t cfg, uint32_t addr, uint32_t prev_addr, PmpRange *out);
 // The same for entry i of a CPU, with prev_addr = pmpaddr[i-1] (0 for entry 0).
 // Returns false when it matches nothing, and for i >= PMP_ENTRIES.
 bool pmp_entry_range(const CPU *cpu, unsigned i, PmpRange *out);
+
+typedef enum {
+    PMP_ACCESS_READ,
+    PMP_ACCESS_WRITE,
+    PMP_ACCESS_EXEC,
+} PmpAccess;
+
+// Whether an access of `size` bytes at `addr` is allowed. `mode` is the access's effective privilege
+// mode: for loads and stores the caller applies MPRV, and for fetches it is the current mode.
+bool pmp_check(const CPU *cpu, uint32_t addr, uint32_t size, PmpAccess access, PrivMode mode);
