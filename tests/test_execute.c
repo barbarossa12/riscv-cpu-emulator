@@ -1547,6 +1547,10 @@ void test_csr_read_privilege_by_mode(void) {
         {"stval",      0x14302173, true,  false, false},
         {"sip",        0x14402173, true,  false, false},
         {"satp",       0x18002173, true,  false, false},
+        {"medeleg",    0x30202173, true,  true,  false},
+        {"mideleg",    0x30302173, true,  true,  false},
+        {"mstatush",   0x31002173, true,  true,  false},
+        {"medelegh",   0x31202173, true,  true,  false},
         {"cycle",      0xC0002173, false, false, false},
         {"instret",    0xC0202173, false, false, false},
     };
@@ -1656,6 +1660,138 @@ void test_csrrw_sepc_drops_low_bits(void) {
     run_on(&cpu, 0x14109073);                           // CSRRW x0, sepc, x1
     run_on(&cpu, 0x14102173);                           // CSRRS x2, sepc, x0
     TEST_ASSERT_EQUAL_UINT32(0x80000000, cpu_read_reg(&cpu, 2));
+}
+
+/* ---- Trap delegation --------------------------------------------------------------------- */
+
+#define ECALL_WORD   0x00000073u
+#define ILLEGAL_WORD 0x0000007Fu   /* unknown opcode: illegal instruction, mtval/stval = the word */
+#define LW_X1_0_X2   0x00012083u   /* LW x1, 0(x2) */
+
+/* Run one instruction at pc 0x40 on a CPU the caller set up (mode, medeleg, ...), with
+ * stvec = 0x2000 and mtvec = 0x1000. */
+static void run_trap_case(CPU *cpu, uint32_t raw) {
+    Memory mem;
+    mem_init(&mem, 0x100);
+    mem_write32(&mem, 0x40, raw);
+    cpu_write_csr(cpu, CSR_STVEC, 0x2000);
+    cpu_write_csr(cpu, CSR_MTVEC, 0x1000);
+    cpu->pc = 0x40;
+    DecodedInstruction instr = decode_instruction(raw);
+    execute(cpu, &mem, &instr);
+    mem_free(&mem);
+}
+
+/* (mode, medeleg, instruction, x2) -> which mode takes the trap, and the cause */
+void test_trap_routing(void) {
+    const struct {
+        const char *name;
+        PrivMode mode; uint32_t medeleg; uint32_t raw; uint32_t x2;
+        PrivMode target; uint32_t cause;
+    } v[] = {
+        {"U ecall, nothing delegated",   PRV_U, 0x000, ECALL_WORD,   0,      PRV_M, 8},
+        {"U ecall, bit 8 delegated",     PRV_U, 0x100, ECALL_WORD,   0,      PRV_S, 8},
+        {"S ecall, bit 9 delegated",     PRV_S, 0x200, ECALL_WORD,   0,      PRV_S, 9},
+        {"S ecall, nothing delegated",   PRV_S, 0x000, ECALL_WORD,   0,      PRV_M, 9},
+        {"M ecall, everything set",      PRV_M, 0xB3FF, ECALL_WORD,  0,      PRV_M, 11},
+        {"M illegal, everything set",    PRV_M, 0xB3FF, ILLEGAL_WORD, 0,     PRV_M, 2},
+        {"U illegal, bit 2 delegated",   PRV_U, 0x004, ILLEGAL_WORD, 0,      PRV_S, 2},
+        {"U illegal, only bit 8 set",    PRV_U, 0x100, ILLEGAL_WORD, 0,      PRV_M, 2},
+        {"U load fault, bit 5 delegated", PRV_U, 0x020, LW_X1_0_X2,  0x1000, PRV_S, 5},
+    };
+    for (unsigned i = 0; i < sizeof v / sizeof v[0]; i++) {
+        CPU cpu; test_cpu_reset_in_mode(&cpu, v[i].mode);
+        cpu_write_csr(&cpu, CSR_MEDELEG, v[i].medeleg);
+        cpu_write_reg(&cpu, 2, v[i].x2);
+        run_trap_case(&cpu, v[i].raw);
+
+        TEST_ASSERT_EQUAL_INT_MESSAGE(v[i].target, cpu.privilege_mode, v[i].name);
+        TEST_ASSERT_EQUAL_UINT32_MESSAGE(v[i].target == PRV_S ? 0x2000 : 0x1000, cpu.pc, v[i].name);
+        uint32_t cause_csr = v[i].target == PRV_S ? CSR_SCAUSE : CSR_MCAUSE;
+        TEST_ASSERT_EQUAL_UINT32_MESSAGE(v[i].cause, cpu_read_csr(&cpu, cause_csr), v[i].name);
+    }
+}
+
+/* A trap from U delegated to S: S registers are written, M registers and MPP/MPIE are not. */
+void test_delegated_trap_writes_s_state_and_leaves_m_state(void) {
+    CPU cpu; test_cpu_reset_in_mode(&cpu, PRV_U);
+    cpu_write_csr(&cpu, CSR_MEDELEG, 0x100);
+    cpu_write_csr(&cpu, CSR_MSTATUS, 0x188A);   // MIE, MPIE, MPP = M, SIE
+    cpu_write_csr(&cpu, CSR_MEPC, 0x1110);      // markers: a trap into S must not touch these
+    cpu_write_csr(&cpu, CSR_MCAUSE, 0x77);
+    cpu_write_csr(&cpu, CSR_MTVAL, 0x66);
+    cpu_write_csr(&cpu, CSR_STVEC, 0x2003);     // low bits are masked
+
+    Memory mem;
+    mem_init(&mem, 0x100);
+    mem_write32(&mem, 0x40, ECALL_WORD);
+    cpu.pc = 0x40;
+    DecodedInstruction instr = decode_instruction(ECALL_WORD);
+    execute(&cpu, &mem, &instr);
+    mem_free(&mem);
+
+    TEST_ASSERT_EQUAL_INT(PRV_S, cpu.privilege_mode);
+    TEST_ASSERT_EQUAL_UINT32(0x2000, cpu.pc);
+    TEST_ASSERT_EQUAL_UINT32(0x40, cpu_read_csr(&cpu, CSR_SEPC));
+    TEST_ASSERT_EQUAL_UINT32(8, cpu_read_csr(&cpu, CSR_SCAUSE));
+    TEST_ASSERT_EQUAL_UINT32(0, cpu_read_csr(&cpu, CSR_STVAL));
+    TEST_ASSERT_EQUAL_UINT32(0x18A8, cpu_read_csr(&cpu, CSR_MSTATUS)); // SIE -> SPIE, SPP = 0, M bits kept
+    TEST_ASSERT_EQUAL_UINT32(0x1110, cpu_read_csr(&cpu, CSR_MEPC));
+    TEST_ASSERT_EQUAL_UINT32(0x77, cpu_read_csr(&cpu, CSR_MCAUSE));
+    TEST_ASSERT_EQUAL_UINT32(0x66, cpu_read_csr(&cpu, CSR_MTVAL));
+}
+
+/* (mode, SIE before) -> sstatus after the delegated trap */
+void test_delegated_trap_spp_and_interrupt_enable_stack(void) {
+    const struct { PrivMode mode; uint32_t mstatus; uint32_t sstatus; } v[] = {
+        {PRV_S, 0x0, 0x100},   // SPP = 1, SPIE = 0
+        {PRV_S, 0x2, 0x120},   // SPP = 1, SPIE = 1, SIE cleared
+        {PRV_U, 0x2, 0x020},   // SPP = 0, SPIE = 1
+        {PRV_U, 0x0, 0x000},
+    };
+    for (unsigned i = 0; i < sizeof v / sizeof v[0]; i++) {
+        CPU cpu; test_cpu_reset_in_mode(&cpu, v[i].mode);
+        cpu_write_csr(&cpu, CSR_MEDELEG, 0x300);          // ECALL from U and from S
+        cpu_write_csr(&cpu, CSR_MSTATUS, v[i].mstatus);
+        run_trap_case(&cpu, ECALL_WORD);
+        TEST_ASSERT_EQUAL_UINT32(v[i].sstatus, cpu_read_csr(&cpu, CSR_SSTATUS));
+    }
+}
+
+void test_delegated_trap_stval_holds_the_instruction_or_address(void) {
+    CPU cpu; test_cpu_reset_in_mode(&cpu, PRV_S);
+    cpu_write_csr(&cpu, CSR_MEDELEG, 0x24);              // illegal (2) and load fault (5)
+    run_trap_case(&cpu, ILLEGAL_WORD);
+    TEST_ASSERT_EQUAL_UINT32(ILLEGAL_WORD, cpu_read_csr(&cpu, CSR_STVAL));
+
+    test_cpu_reset_in_mode(&cpu, PRV_S);
+    cpu_write_csr(&cpu, CSR_MEDELEG, 0x24);
+    cpu_write_reg(&cpu, 2, 0x1000);
+    run_trap_case(&cpu, LW_X1_0_X2);
+    TEST_ASSERT_EQUAL_UINT32(5, cpu_read_csr(&cpu, CSR_SCAUSE));
+    TEST_ASSERT_EQUAL_UINT32(0x1000, cpu_read_csr(&cpu, CSR_STVAL));
+}
+
+void test_delegated_trap_does_not_retire(void) {
+    CPU cpu; test_cpu_reset_in_mode(&cpu, PRV_U);
+    cpu_write_csr(&cpu, CSR_MEDELEG, 0x100);
+    Memory mem;
+    mem_init(&mem, 64);
+    mem_write32(&mem, 0, ECALL_WORD);
+    cpu_step(&cpu, &mem);
+    TEST_ASSERT_EQUAL_UINT64(1, cpu.mcycle);
+    TEST_ASSERT_EQUAL_UINT64(0, cpu.minstret);
+    mem_free(&mem);
+}
+
+void test_delegation_csrs_through_instructions(void) {
+    CPU cpu; cpu_reset(&cpu);
+    cpu_write_reg(&cpu, 1, 0xFFFFFFFF);
+    run_on(&cpu, 0x30209073);                            // CSRRW x0, medeleg, x1
+    TEST_ASSERT_EQUAL_UINT32(4, cpu.pc);                 // no trap
+    TEST_ASSERT_EQUAL_UINT32(0xB3FF, cpu_read_csr(&cpu, CSR_MEDELEG));
+    run_on(&cpu, 0x30309073);                            // CSRRW x0, mideleg, x1
+    TEST_ASSERT_EQUAL_UINT32(0x222, cpu_read_csr(&cpu, CSR_MIDELEG));
 }
 
 /* Read-only CSR addresses (csr[11:10] == 0b11), here 0xF14 (mhartid) */
@@ -1793,6 +1929,7 @@ void test_csr_read_every_implemented_csr_does_not_trap(void) {
         CSR_MCOUNTEREN, CSR_SCOUNTEREN,
         CSR_SSTATUS, CSR_SIE, CSR_STVEC, CSR_SSCRATCH, CSR_SEPC, CSR_SCAUSE, CSR_STVAL,
         CSR_SIP, CSR_SATP,
+        CSR_MEDELEG, CSR_MIDELEG, CSR_MEDELEGH, CSR_MSTATUSH,
     };
     for (size_t i = 0; i < sizeof(implemented) / sizeof(implemented[0]); i++) {
         CPU cpu; cpu_reset(&cpu);
@@ -2637,6 +2774,12 @@ int main(void) {
     RUN_TEST(test_csrrs_sstatus_sets_sie_in_mstatus);
     RUN_TEST(test_csrrc_sstatus_clears_only_s_bits);
     RUN_TEST(test_csrrw_sepc_drops_low_bits);
+    RUN_TEST(test_trap_routing);
+    RUN_TEST(test_delegated_trap_writes_s_state_and_leaves_m_state);
+    RUN_TEST(test_delegated_trap_spp_and_interrupt_enable_stack);
+    RUN_TEST(test_delegated_trap_stval_holds_the_instruction_or_address);
+    RUN_TEST(test_delegated_trap_does_not_retire);
+    RUN_TEST(test_delegation_csrs_through_instructions);
     RUN_TEST(test_csrr_misa_reports_rv32ius);
     RUN_TEST(test_csrr_tdata1_reads_zero);
     RUN_TEST(test_tdata1_write_does_not_read_back);
