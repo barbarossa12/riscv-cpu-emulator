@@ -125,6 +125,62 @@ void test_cpu_mstatus_other_bits_round_trip(void) {
 	TEST_ASSERT_EQUAL_UINT32(MSTATUS_MIE | MSTATUS_MPIE | MSTATUS_MPP, cpu_read_csr(&test_cpu, CSR_MSTATUS));
 }
 
+void test_cpu_counter_halves_round_trip(void) {
+	CPU test_cpu = {0};
+	cpu_write_csr(&test_cpu, CSR_MCYCLE, 0x11111111);
+	cpu_write_csr(&test_cpu, CSR_MCYCLEH, 0x22222222);
+	cpu_write_csr(&test_cpu, CSR_MINSTRET, 0x33333333);
+	cpu_write_csr(&test_cpu, CSR_MINSTRETH, 0x44444444);
+	TEST_ASSERT_EQUAL_UINT32(0x11111111, cpu_read_csr(&test_cpu, CSR_MCYCLE));
+	TEST_ASSERT_EQUAL_UINT32(0x22222222, cpu_read_csr(&test_cpu, CSR_MCYCLEH));
+	TEST_ASSERT_EQUAL_UINT32(0x33333333, cpu_read_csr(&test_cpu, CSR_MINSTRET));
+	TEST_ASSERT_EQUAL_UINT32(0x44444444, cpu_read_csr(&test_cpu, CSR_MINSTRETH));
+	TEST_ASSERT_EQUAL_UINT64(0x2222222211111111ull, test_cpu.mcycle);
+	TEST_ASSERT_EQUAL_UINT64(0x4444444433333333ull, test_cpu.minstret);
+}
+
+void test_cpu_counter_half_writes_keep_the_other_half(void) {
+	CPU test_cpu = {0};
+	test_cpu.mcycle = 0xAAAAAAAABBBBBBBBull;
+	cpu_write_csr(&test_cpu, CSR_MCYCLE, 0x1);
+	TEST_ASSERT_EQUAL_UINT64(0xAAAAAAAA00000001ull, test_cpu.mcycle);
+	cpu_write_csr(&test_cpu, CSR_MCYCLEH, 0x2);
+	TEST_ASSERT_EQUAL_UINT64(0x0000000200000001ull, test_cpu.mcycle);
+}
+
+void test_cpu_counter_shadows_read_the_machine_counters(void) {
+	CPU test_cpu = {0};
+	test_cpu.mcycle = 0x0000000100000005ull;
+	test_cpu.minstret = 0x0000000200000009ull;
+	TEST_ASSERT_EQUAL_UINT32(5, cpu_read_csr(&test_cpu, CSR_CYCLE));
+	TEST_ASSERT_EQUAL_UINT32(1, cpu_read_csr(&test_cpu, CSR_CYCLEH));
+	TEST_ASSERT_EQUAL_UINT32(9, cpu_read_csr(&test_cpu, CSR_INSTRET));
+	TEST_ASSERT_EQUAL_UINT32(2, cpu_read_csr(&test_cpu, CSR_INSTRETH));
+}
+
+void test_cpu_counter_shadows_ignore_writes(void) {
+	CPU test_cpu = {0};
+	test_cpu.mcycle = 7;
+	test_cpu.minstret = 9;
+	cpu_write_csr(&test_cpu, CSR_CYCLE, 0xFFFF);
+	cpu_write_csr(&test_cpu, CSR_CYCLEH, 0xFFFF);
+	cpu_write_csr(&test_cpu, CSR_INSTRET, 0xFFFF);
+	cpu_write_csr(&test_cpu, CSR_INSTRETH, 0xFFFF);
+	TEST_ASSERT_EQUAL_UINT64(7, test_cpu.mcycle);
+	TEST_ASSERT_EQUAL_UINT64(9, test_cpu.minstret);
+	TEST_ASSERT_FALSE(test_cpu.mcycle_written);
+	TEST_ASSERT_FALSE(test_cpu.minstret_written);
+}
+
+void test_cpu_counter_write_marks_only_that_counter(void) {
+	CPU test_cpu = {0};
+	cpu_write_csr(&test_cpu, CSR_MINSTRETH, 1);
+	TEST_ASSERT_TRUE(test_cpu.minstret_written);
+	TEST_ASSERT_FALSE(test_cpu.mcycle_written);
+	cpu_write_csr(&test_cpu, CSR_MCYCLE, 1);
+	TEST_ASSERT_TRUE(test_cpu.mcycle_written);
+}
+
 int main(void) {
 	UNITY_BEGIN();
 	RUN_TEST(test_cpu_write_read_roundtrip_x5);
@@ -143,6 +199,11 @@ int main(void) {
 	RUN_TEST(test_cpu_mstatus_mpp_is_m_from_reset);
 	RUN_TEST(test_cpu_mstatus_mpp_ignores_writes);
 	RUN_TEST(test_cpu_mstatus_other_bits_round_trip);
+	RUN_TEST(test_cpu_counter_halves_round_trip);
+	RUN_TEST(test_cpu_counter_half_writes_keep_the_other_half);
+	RUN_TEST(test_cpu_counter_shadows_read_the_machine_counters);
+	RUN_TEST(test_cpu_counter_shadows_ignore_writes);
+	RUN_TEST(test_cpu_counter_write_marks_only_that_counter);
 	return UNITY_END();
 }
 
