@@ -61,3 +61,38 @@ void pmp_csr_write(CPU *cpu, uint16_t csr_addr, uint32_t value) {
     }
     write_addr(cpu, csr_addr - CSR_PMPADDR0, value);
 }
+
+bool pmp_range(uint8_t cfg, uint32_t addr, uint32_t prev_addr, PmpRange *out) {
+    switch ((cfg & PMP_A_MASK) >> PMP_A_SHIFT) {
+        case PMP_A_TOR:
+            out->lo = (uint64_t)prev_addr << 2;
+            out->hi = (uint64_t)addr << 2;
+            return out->lo < out->hi;                 // lo >= hi matches nothing
+        case PMP_A_NA4:
+            out->lo = (uint64_t)addr << 2;
+            out->hi = out->lo + 4;
+            return true;
+        case PMP_A_NAPOT: {
+            // t trailing ones select a region of 2^(t+3) bytes. The ones and the zero above them
+            // are the size bits; the bits above those are the base.
+            unsigned t = 0;
+            while (t < 32 && ((addr >> t) & 1u)) {
+                t++;
+            }
+            uint64_t base_words = (uint64_t)addr & ~((1ull << (t + 1)) - 1);
+            out->lo = base_words << 2;
+            out->hi = out->lo + (1ull << (t + 3));
+            return true;
+        }
+        default:                                       // PMP_A_OFF
+            return false;
+    }
+}
+
+bool pmp_entry_range(const CPU *cpu, unsigned i, PmpRange *out) {
+    if (i >= PMP_ENTRIES) {
+        return false;
+    }
+    uint32_t prev = i == 0 ? 0 : cpu->pmpaddr[i - 1];   // the previous entry's config is irrelevant
+    return pmp_range(cpu->pmpcfg[i], cpu->pmpaddr[i], prev, out);
+}
