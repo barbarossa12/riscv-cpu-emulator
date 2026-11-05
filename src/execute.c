@@ -520,6 +520,7 @@ static bool csr_exists(uint16_t csr_addr) {
         case CSR_MCOUNTEREN: case CSR_SCOUNTEREN:
         case CSR_SSTATUS: case CSR_SIE: case CSR_STVEC: case CSR_SSCRATCH:
         case CSR_SEPC: case CSR_SCAUSE: case CSR_STVAL: case CSR_SIP: case CSR_SATP:
+        case CSR_MEDELEG: case CSR_MIDELEG: case CSR_MEDELEGH: case CSR_MSTATUSH:
             return true;
         default:
             return false;
@@ -611,15 +612,33 @@ static uint32_t ecall_cause(PrivMode mode) {
 
 static uint32_t trap_enter(CPU *cpu, uint32_t pc, uint32_t cause, uint32_t tval) {
     cpu->trapped = true; // a trapping instruction does not retire (minstret)
-    LOG_DEBUG("trap: %s -> M, cause %u, epc 0x%08x, tval 0x%08x",
-              mode_name(cpu->privilege_mode), cause, pc, tval);
+    PrivMode from = cpu->privilege_mode;
+    // A trap taken in M is never delegated. From S or U, a set medeleg bit sends it to S.
+    // (Interrupts have bit 31 set and do not come through here until Milestone 6.)
+    bool to_s = from != PRV_M && cause < 32 && ((cpu_read_csr(cpu, CSR_MEDELEG) >> cause) & 1u);
+    LOG_DEBUG("trap: %s -> %s, cause %u, epc 0x%08x, tval 0x%08x",
+              mode_name(from), to_s ? "S" : "M", cause, pc, tval);
+
     uint32_t mstatus = cpu_read_csr(cpu, CSR_MSTATUS);
+    if (to_s) {
+        uint32_t sie = (mstatus & MSTATUS_SIE) ? 1 : 0;
+        mstatus &= ~(MSTATUS_SPIE | MSTATUS_SIE | MSTATUS_SPP);
+        mstatus |= sie ? MSTATUS_SPIE : 0;               // SPIE = old SIE
+        mstatus |= (from == PRV_U) ? 0 : MSTATUS_SPP;    // SPP = U (0) or not U (1)
+        cpu_write_csr(cpu, CSR_MSTATUS, mstatus);
+        cpu->privilege_mode = PRV_S;
+        cpu_write_csr(cpu, CSR_SEPC, pc);
+        cpu_write_csr(cpu, CSR_SCAUSE, cause);
+        cpu_write_csr(cpu, CSR_STVAL, tval);
+        return cpu_read_csr(cpu, CSR_STVEC);
+    }
+
     uint32_t mie = (mstatus & MSTATUS_MIE) ? 1 : 0;
     mstatus &= ~(MSTATUS_MPIE | MSTATUS_MIE | MSTATUS_MPP);
-    mstatus |= mie ? MSTATUS_MPIE : 0;  // MPIE = old MIE
-    mstatus |= ((uint32_t)cpu->privilege_mode << 11); // MPP = the mode we trapped from
+    mstatus |= mie ? MSTATUS_MPIE : 0;                   // MPIE = old MIE
+    mstatus |= ((uint32_t)from << 11);                   // MPP = the mode we trapped from
     cpu_write_csr(cpu, CSR_MSTATUS, mstatus);
-    cpu->privilege_mode = PRV_M;        // every trap goes to M until delegation lands
+    cpu->privilege_mode = PRV_M;
 
     cpu_write_csr(cpu, CSR_MEPC, pc);
     cpu_write_csr(cpu, CSR_MCAUSE, cause);
