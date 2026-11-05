@@ -1,10 +1,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <errno.h>
+#include <string.h>
 #include "cpu.h"
 #include "mem.h"
 #include "execute.h"
 #include "elf.h"
+#include "log.h"
 
 #define RAM_BASE              0x80000000u
 #define RAM_SIZE              (16u * 1024 * 1024)
@@ -20,7 +22,23 @@ static int usage(const char *prog) {
 	return EXIT_LOAD_ERROR;
 }
 
+/* RISCV_EMU_LOG=error|warn|info|debug sets the log level (default: info). At debug level
+ * the emulator logs every privilege-mode change to stderr. */
+static void set_log_level_from_env(const char *prog) {
+	const char *v = getenv("RISCV_EMU_LOG");
+	if (!v) {
+		return;
+	}
+	if      (strcmp(v, "error") == 0) log_set_level(LOG_LEVEL_ERROR);
+	else if (strcmp(v, "warn")  == 0) log_set_level(LOG_LEVEL_WARN);
+	else if (strcmp(v, "info")  == 0) log_set_level(LOG_LEVEL_INFO);
+	else if (strcmp(v, "debug") == 0) log_set_level(LOG_LEVEL_DEBUG);
+	else fprintf(stderr, "%s: ignoring RISCV_EMU_LOG=%s (use error, warn, info or debug)\n", prog, v);
+}
+
 int main(int argc, char **argv) {
+	set_log_level_from_env(argv[0]);
+
 	if (argc < 2 || argc > 3) {
 		return usage(argv[0]);
 	}

@@ -14,6 +14,7 @@ static uint32_t execute_fence(CPU *cpu, Memory *mem, DecodedInstruction *instr, 
 static uint32_t execute_system(CPU *cpu, Memory *mem, DecodedInstruction *instr, uint32_t pc);
 static uint32_t trap_enter(CPU *cpu, uint32_t pc, uint32_t cause, uint32_t tval);
 static uint32_t ecall_cause(PrivMode mode);
+static const char *mode_name(PrivMode mode);
 static bool target_misaligned(uint32_t target);
 static bool csr_exists(uint16_t csr_addr);
 static bool csr_is_read_only(uint16_t csr_addr);
@@ -433,6 +434,7 @@ static uint32_t execute_system(CPU *cpu, Memory *mem, DecodedInstruction *instr,
                 }
                 cpu_write_csr(cpu, CSR_MSTATUS, mstatus);
                 cpu->privilege_mode = prev;
+                LOG_DEBUG("mret: M -> %s, pc 0x%08x", mode_name(prev), cpu_read_csr(cpu, CSR_MEPC));
                 return cpu_read_csr(cpu, CSR_MEPC); // jump back to where the trap occurred
             }
             LOG_FATAL("unexpected imm for opcode 0x73 funct3 0x0: imm=0x%x", instr->imm);
@@ -554,6 +556,15 @@ static uint32_t take_branch(CPU *cpu, uint32_t pc, DecodedInstruction *instr) {
     return target;
 }
 
+static const char *mode_name(PrivMode mode) {
+    switch (mode) {
+        case PRV_U: return "U";
+        case PRV_S: return "S";
+        case PRV_M: return "M";
+        default:    return "?";
+    }
+}
+
 // Environment-call exception code for the mode ECALL runs in
 static uint32_t ecall_cause(PrivMode mode) {
     switch (mode) {
@@ -565,6 +576,8 @@ static uint32_t ecall_cause(PrivMode mode) {
 
 static uint32_t trap_enter(CPU *cpu, uint32_t pc, uint32_t cause, uint32_t tval) {
     cpu->trapped = true; // a trapping instruction does not retire (minstret)
+    LOG_DEBUG("trap: %s -> M, cause %u, epc 0x%08x, tval 0x%08x",
+              mode_name(cpu->privilege_mode), cause, pc, tval);
     uint32_t mstatus = cpu_read_csr(cpu, CSR_MSTATUS);
     uint32_t mie = (mstatus & MSTATUS_MIE) ? 1 : 0;
     mstatus &= ~(MSTATUS_MPIE | MSTATUS_MIE | MSTATUS_MPP);

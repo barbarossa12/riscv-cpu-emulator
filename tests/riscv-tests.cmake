@@ -61,6 +61,21 @@ if(RISCV_TESTS)
     set_tests_properties(riscv-tests.build PROPERTIES
         FIXTURES_SETUP riscv-tests-elfs TIMEOUT 300)
 
+    # The mode trace. With RISCV_EMU_LOG=debug an rv32ui test shows its ecall from
+    # U-mode (which also proves the test body runs in U-mode), and without the variable
+    # nothing is printed.
+    add_test(NAME riscv-tests.trace-mode-on
+             COMMAND ${CMAKE_COMMAND} -E env RISCV_EMU_LOG=debug
+                     $<TARGET_FILE:riscv_emu> "${RISCV_TESTS_BUILD_DIR}/rv32ui-p-add")
+    set_tests_properties(riscv-tests.trace-mode-on PROPERTIES
+        FIXTURES_REQUIRED riscv-tests-elfs TIMEOUT 60 LABELS riscv-tests
+        PASS_REGULAR_EXPRESSION "trap: U -> M, cause 8")
+    add_test(NAME riscv-tests.trace-mode-off
+             COMMAND riscv_emu "${RISCV_TESTS_BUILD_DIR}/rv32ui-p-add")
+    set_tests_properties(riscv-tests.trace-mode-off PROPERTIES
+        FIXTURES_REQUIRED riscv-tests-elfs TIMEOUT 60 LABELS riscv-tests
+        FAIL_REGULAR_EXPRESSION "trap:")
+
     foreach(name ${_names})
         add_test(NAME riscv-tests.${name}
                  COMMAND riscv_emu "${RISCV_TESTS_BUILD_DIR}/${name}")
