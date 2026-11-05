@@ -13,6 +13,11 @@
 #define CSR_STVAL    0x143
 #define CSR_SIP      0x144
 #define CSR_SATP     0x180
+
+#define CSR_PMPCFG0  0x3A0   // pmpcfg0..pmpcfg15 = 0x3A0..0x3AF
+#define CSR_PMPADDR0 0x3B0   // pmpaddr0..pmpaddr63 = 0x3B0..0x3EF
+
+#define PMP_ENTRIES 16       // entries 16..63 exist as CSRs but are read-only 0
 #define CSR_MEDELEG  0x302
 #define CSR_MIDELEG  0x303
 #define CSR_MSTATUSH 0x310   // RV32 upper half of mstatus: every field is read-only 0 (little-endian only,
@@ -96,6 +101,8 @@ typedef struct CPU {
 	uint32_t regs[32];
 	uint32_t pc;
 	uint32_t csr[4096]; // indexed directly by the 12-bit CSR address
+	uint8_t  pmpcfg[PMP_ENTRIES];    // one config byte per implemented PMP entry
+	uint32_t pmpaddr[PMP_ENTRIES];   // address bits 33:2 of each entry's region
 	PrivMode privilege_mode; // current mode. A zeroed CPU is in U-mode, so call cpu_reset()
 
 	uint64_t mcycle;    // behind mcycle/mcycleh and the cycle/cycleh shadows
