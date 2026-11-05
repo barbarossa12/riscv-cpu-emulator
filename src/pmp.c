@@ -96,3 +96,33 @@ bool pmp_entry_range(const CPU *cpu, unsigned i, PmpRange *out) {
     uint32_t prev = i == 0 ? 0 : cpu->pmpaddr[i - 1];   // the previous entry's config is irrelevant
     return pmp_range(cpu->pmpcfg[i], cpu->pmpaddr[i], prev, out);
 }
+
+bool pmp_check(const CPU *cpu, uint32_t addr, uint32_t size, PmpAccess access, PrivMode mode) {
+    uint64_t lo = addr;
+    uint64_t hi = (uint64_t)addr + size;            // 64-bit: the physical space is 34 bits wide
+
+    for (unsigned i = 0; i < PMP_ENTRIES; i++) {
+        PmpRange r;
+        if (!pmp_entry_range(cpu, i, &r)) {
+            continue;                                // OFF, or an empty TOR
+        }
+        if (hi <= r.lo || lo >= r.hi) {
+            continue;                                // no byte in common
+        }
+        // The lowest-numbered entry that matches any byte decides, and it must match all of them.
+        if (lo < r.lo || hi > r.hi) {
+            return false;
+        }
+        uint8_t cfg = cpu->pmpcfg[i];
+        if (mode == PRV_M && !(cfg & PMP_L)) {
+            return true;                             // L clear: M-mode ignores the permissions
+        }
+        switch (access) {
+            case PMP_ACCESS_READ:  return (cfg & PMP_R) != 0;
+            case PMP_ACCESS_WRITE: return (cfg & PMP_W) != 0;
+            default:               return (cfg & PMP_X) != 0;
+        }
+    }
+    // No entry matched. At least one entry is implemented, so S and U fail; M-mode succeeds.
+    return mode == PRV_M;
+}
