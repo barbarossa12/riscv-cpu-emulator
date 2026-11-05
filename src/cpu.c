@@ -42,6 +42,14 @@ uint32_t cpu_read_csr(CPU *cpu, uint16_t addr){
 		LOG_FATAL("CPU CSR register value larger than 0xFFF: 0x%x", addr);
 	}
 	switch(addr) {
+		case CSR_SSTATUS:
+			return cpu->csr[CSR_MSTATUS] & SSTATUS_MASK;
+		case CSR_SIE:   // only delegated interrupts are visible
+			return cpu->csr[CSR_MIE] & cpu->csr[CSR_MIDELEG] & INT_S_ALL;
+		case CSR_SIP:
+			return cpu->csr[CSR_MIP] & cpu->csr[CSR_MIDELEG] & INT_S_ALL;
+		case CSR_SATP:  // read-only 0 until Milestone 5
+			return 0;
 		case CSR_MISA:
 			return MISA_VALUE;
 		case CSR_MCYCLE:
@@ -111,14 +119,36 @@ void cpu_write_csr(CPU *cpu, uint16_t addr, uint32_t value) {
 			cpu->csr[addr] = new_val;
 			return;
 		}
+		case CSR_MIE:   // MSIE/MTIE/MEIE are read-only 0 until their sources exist (Milestones 6, 8)
+		case CSR_MIP:   // MSIP/MTIP/MEIP are set by the platform, so absent until then
+			cpu->csr[addr] = value & INT_S_ALL;
+			return;
+		case CSR_SSTATUS:
+			cpu_write_csr(cpu, CSR_MSTATUS,
+			              (cpu->csr[CSR_MSTATUS] & ~SSTATUS_MASK) | (value & SSTATUS_MASK));
+			return;
+		case CSR_SIE: {
+			uint32_t m = cpu->csr[CSR_MIDELEG] & INT_S_ALL;      // delegated bits only
+			cpu->csr[CSR_MIE] = (cpu->csr[CSR_MIE] & ~m) | (value & m);
+			return;
+		}
+		case CSR_SIP: {
+			uint32_t m = cpu->csr[CSR_MIDELEG] & INT_SSI;        // only SSIP is writable in sip
+			cpu->csr[CSR_MIP] = (cpu->csr[CSR_MIP] & ~m) | (value & m);
+			return;
+		}
+		case CSR_SATP:
+			return;                                              // read-only 0 until Milestone 5
 		case CSR_MCOUNTEREN:
 		case CSR_SCOUNTEREN:
 			cpu->csr[addr] = value & COUNTEREN_WRITABLE; // WARL: other bits read-only 0
 			return;
 		case CSR_MEPC:
+		case CSR_SEPC:
 			value &= ~0x3u; // IALIGN=32: the low two bits are always 0
 			break;
 		case CSR_MTVEC:
+		case CSR_STVEC:
 			// MODE is WARL: only Direct (0) is supported, so MODE reads back as 0
 			value &= ~0x3u;
 			break;
