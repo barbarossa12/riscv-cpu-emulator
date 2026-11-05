@@ -472,6 +472,156 @@ void test_cpu_mideleg_write_feeds_the_sie_view(void) {
 	TEST_ASSERT_EQUAL_UINT32(0x22, cpu_read_csr(&c, CSR_SIE));
 }
 
+/* ---- PMP CSRs ---------------------------------------------------------------------------- */
+
+/* Entry i's config byte, through the packed pmpcfg CSR. */
+static uint8_t pmp_cfg(CPU *c, unsigned i) {
+	return (uint8_t)(cpu_read_csr(c, CSR_PMPCFG0 + i / 4) >> (8 * (i % 4)));
+}
+
+/* Write only entry 0's byte: the other three bytes of pmpcfg0 are written as 0. */
+static void write_pmp_cfg0_byte(CPU *c, uint8_t b) {
+	cpu_write_csr(c, CSR_PMPCFG0, b);
+}
+
+void test_cpu_pmp_reads_zero_after_reset(void) {
+	CPU c; cpu_reset(&c);
+	for (unsigned i = 0; i < 16; i++) {
+		TEST_ASSERT_EQUAL_UINT32(0, cpu_read_csr(&c, CSR_PMPCFG0 + i));
+	}
+	for (unsigned i = 0; i < 64; i++) {
+		TEST_ASSERT_EQUAL_UINT32(0, cpu_read_csr(&c, CSR_PMPADDR0 + i));
+	}
+}
+
+/* old byte (set first) -> written byte -> stored byte, on entry 0 */
+void test_cpu_pmpcfg_byte_writes(void) {
+	const struct { const char *why; uint8_t old, written, stored; } v[] = {
+		{"NAPOT with RWX",               0x00, 0x1F, 0x1F},
+		{"R=0 W=1 is reserved",          0x00, 0x02, 0x00},
+		{"A=TOR applies, RWX stays 101", 0x05, 0x0A, 0x0D},
+		{"A=NAPOT applies, RWX stays",   0x07, 0x1A, 0x1F},
+		{"reserved bits 6:5 read 0",     0x00, 0x60, 0x00},
+		{"L, A and RWX legal",           0x00, 0xFF, 0x9F},
+		{"L applies, RWX stays 000",     0x00, 0x82, 0x80},
+		{"WX with R=0 is reserved",      0x00, 0x06, 0x00},
+		{"R is legal",                   0x00, 0x01, 0x01},
+		{"X is legal",                   0x00, 0x04, 0x04},
+		{"RW is legal",                  0x00, 0x03, 0x03},
+		{"locked: write ignored",        0x9F, 0x00, 0x9F},
+	};
+	for (unsigned i = 0; i < sizeof v / sizeof v[0]; i++) {
+		CPU c; cpu_reset(&c);
+		write_pmp_cfg0_byte(&c, v[i].old);
+		TEST_ASSERT_EQUAL_UINT8_MESSAGE(v[i].old, pmp_cfg(&c, 0), "setup");
+		write_pmp_cfg0_byte(&c, v[i].written);
+		TEST_ASSERT_EQUAL_UINT8_MESSAGE(v[i].stored, pmp_cfg(&c, 0), v[i].why);
+	}
+}
+
+void test_cpu_pmpcfg_packs_four_entries_per_csr(void) {
+	CPU c; cpu_reset(&c);
+	cpu_write_csr(&c, CSR_PMPCFG0, 0x1F1B0F07);       // entries 0-3: 07, 0F, 1B, 1F
+	TEST_ASSERT_EQUAL_UINT32(0x1F1B0F07, cpu_read_csr(&c, CSR_PMPCFG0));
+	TEST_ASSERT_EQUAL_UINT8(0x07, c.pmpcfg[0]);
+	TEST_ASSERT_EQUAL_UINT8(0x0F, c.pmpcfg[1]);
+	TEST_ASSERT_EQUAL_UINT8(0x1B, c.pmpcfg[2]);
+	TEST_ASSERT_EQUAL_UINT8(0x1F, c.pmpcfg[3]);
+
+	cpu_write_csr(&c, CSR_PMPCFG0 + 3, 0x1F1B0F07);   // pmpcfg3 holds entries 12-15
+	TEST_ASSERT_EQUAL_UINT32(0x1F1B0F07, cpu_read_csr(&c, CSR_PMPCFG0 + 3));
+	TEST_ASSERT_EQUAL_UINT8(0x07, c.pmpcfg[12]);
+	TEST_ASSERT_EQUAL_UINT8(0x1F, c.pmpcfg[15]);
+	TEST_ASSERT_EQUAL_UINT32(0x1F1B0F07, cpu_read_csr(&c, CSR_PMPCFG0));   // entries 0-3 untouched
+}
+
+/* One write with four bytes: an illegal RWX keeps the old RWX, but A still applies. */
+void test_cpu_pmpcfg_mixed_write_keeps_rwx_per_byte(void) {
+	CPU c; cpu_reset(&c);
+	cpu_write_csr(&c, CSR_PMPCFG0, 0x07070707);       // RWX everywhere
+	cpu_write_csr(&c, CSR_PMPCFG0, 0x1F020A1A);       // bytes 1A, 0A, 02, 1F (entry 0 first)
+	TEST_ASSERT_EQUAL_UINT32(0x1F070F1F, cpu_read_csr(&c, CSR_PMPCFG0));
+}
+
+void test_cpu_pmpcfg_locked_entry_survives_a_mixed_write(void) {
+	CPU c; cpu_reset(&c);
+	cpu_write_csr(&c, CSR_PMPCFG0, 0x079F0707);       // entry 2 is locked
+	cpu_write_csr(&c, CSR_PMPCFG0, 0);
+	TEST_ASSERT_EQUAL_UINT32(0x009F0000, cpu_read_csr(&c, CSR_PMPCFG0));
+}
+
+void test_cpu_pmpaddr_round_trips_all_32_bits(void) {
+	const uint32_t values[] = {0xFFFFFFFF, 0x12345678, 0};
+	for (unsigned n = 0; n < 16; n++) {
+		for (unsigned i = 0; i < 3; i++) {
+			CPU c; cpu_reset(&c);
+			cpu_write_csr(&c, CSR_PMPADDR0 + n, values[i]);
+			TEST_ASSERT_EQUAL_UINT32(values[i], cpu_read_csr(&c, CSR_PMPADDR0 + n));
+		}
+	}
+	CPU c; cpu_reset(&c);
+	for (unsigned n = 0; n < 16; n++) {
+		cpu_write_csr(&c, CSR_PMPADDR0 + n, (n + 1) * 0x111);
+	}
+	for (unsigned n = 0; n < 16; n++) {
+		TEST_ASSERT_EQUAL_UINT32((n + 1) * 0x111, cpu_read_csr(&c, CSR_PMPADDR0 + n));   // independent
+	}
+}
+
+/* pmpaddr0..3 start as 0x100, 0x200, 0x300, 0x400; entry 2's config byte is then set to `cfg2`.
+ * Returns which of the four writes of 0xAAAA landed, as a bitmask (bit n = pmpaddr n changed). */
+static unsigned pmpaddr_writes_that_land(uint8_t cfg2) {
+	CPU c; cpu_reset(&c);
+	for (unsigned n = 0; n < 4; n++) {
+		cpu_write_csr(&c, CSR_PMPADDR0 + n, (n + 1) * 0x100);
+	}
+	cpu_write_csr(&c, CSR_PMPCFG0, (uint32_t)cfg2 << 16);
+	unsigned landed = 0;
+	for (unsigned n = 0; n < 4; n++) {
+		cpu_write_csr(&c, CSR_PMPADDR0 + n, 0xAAAA);
+		if (cpu_read_csr(&c, CSR_PMPADDR0 + n) == 0xAAAA) {
+			landed |= 1u << n;
+		}
+	}
+	return landed;
+}
+
+void test_cpu_pmp_locking_protects_pmpaddr(void) {
+	TEST_ASSERT_EQUAL_UINT_MESSAGE(0xF, pmpaddr_writes_that_land(0x08), "entry 2 TOR, not locked: all land");
+	TEST_ASSERT_EQUAL_UINT_MESSAGE(0x9, pmpaddr_writes_that_land(0x88), "entry 2 locked TOR: 1 (neighbour) and 2 (own) ignored");
+	TEST_ASSERT_EQUAL_UINT_MESSAGE(0xB, pmpaddr_writes_that_land(0x9F), "entry 2 locked NAPOT: only 2 ignored");
+	TEST_ASSERT_EQUAL_UINT_MESSAGE(0xB, pmpaddr_writes_that_land(0x80), "entry 2 locked with A=OFF: only 2 ignored");
+}
+
+void test_cpu_pmp_locked_tor_in_the_last_entry_protects_pmpaddr14(void) {
+	CPU c; cpu_reset(&c);
+	cpu_write_csr(&c, CSR_PMPCFG0 + 3, 0x88000000);   // entry 15: locked TOR
+	cpu_write_csr(&c, CSR_PMPADDR0 + 13, 0x1111);
+	cpu_write_csr(&c, CSR_PMPADDR0 + 14, 0x2222);
+	cpu_write_csr(&c, CSR_PMPADDR0 + 15, 0x3333);
+	TEST_ASSERT_EQUAL_UINT32(0x1111, cpu_read_csr(&c, CSR_PMPADDR0 + 13));
+	TEST_ASSERT_EQUAL_UINT32(0, cpu_read_csr(&c, CSR_PMPADDR0 + 14));
+	TEST_ASSERT_EQUAL_UINT32(0, cpu_read_csr(&c, CSR_PMPADDR0 + 15));
+}
+
+void test_cpu_pmp_entries_16_to_63_are_read_only_zero(void) {
+	CPU c; cpu_reset(&c);
+	cpu_write_csr(&c, CSR_PMPCFG0 + 3, 0x1F1F1F1F);   // pmpcfg3 (entries 12-15): real
+	cpu_write_csr(&c, CSR_PMPADDR0 + 15, 0xFFFFFFFF); // pmpaddr15: real
+	TEST_ASSERT_EQUAL_UINT32(0x1F1F1F1F, cpu_read_csr(&c, CSR_PMPCFG0 + 3));
+	TEST_ASSERT_EQUAL_UINT32(0xFFFFFFFF, cpu_read_csr(&c, CSR_PMPADDR0 + 15));
+	for (unsigned i = 4; i < 16; i++) {               // pmpcfg4..15
+		cpu_write_csr(&c, CSR_PMPCFG0 + i, 0xFFFFFFFF);
+		TEST_ASSERT_EQUAL_UINT32(0, cpu_read_csr(&c, CSR_PMPCFG0 + i));
+	}
+	for (unsigned i = 16; i < 64; i++) {              // pmpaddr16..63
+		cpu_write_csr(&c, CSR_PMPADDR0 + i, 0xFFFFFFFF);
+		TEST_ASSERT_EQUAL_UINT32(0, cpu_read_csr(&c, CSR_PMPADDR0 + i));
+	}
+	TEST_ASSERT_EQUAL_UINT32(0x1F1F1F1F, cpu_read_csr(&c, CSR_PMPCFG0 + 3));   // real ones untouched
+	TEST_ASSERT_EQUAL_UINT32(0xFFFFFFFF, cpu_read_csr(&c, CSR_PMPADDR0 + 15));
+}
+
 int main(void) {
 	UNITY_BEGIN();
 	RUN_TEST(test_cpu_write_read_roundtrip_x5);
@@ -503,6 +653,15 @@ int main(void) {
 	RUN_TEST(test_cpu_mideleg_writable_mask);
 	RUN_TEST(test_cpu_medelegh_and_mstatush_are_read_only_zero);
 	RUN_TEST(test_cpu_mideleg_write_feeds_the_sie_view);
+	RUN_TEST(test_cpu_pmp_reads_zero_after_reset);
+	RUN_TEST(test_cpu_pmpcfg_byte_writes);
+	RUN_TEST(test_cpu_pmpcfg_packs_four_entries_per_csr);
+	RUN_TEST(test_cpu_pmpcfg_mixed_write_keeps_rwx_per_byte);
+	RUN_TEST(test_cpu_pmpcfg_locked_entry_survives_a_mixed_write);
+	RUN_TEST(test_cpu_pmpaddr_round_trips_all_32_bits);
+	RUN_TEST(test_cpu_pmp_locking_protects_pmpaddr);
+	RUN_TEST(test_cpu_pmp_locked_tor_in_the_last_entry_protects_pmpaddr14);
+	RUN_TEST(test_cpu_pmp_entries_16_to_63_are_read_only_zero);
 	RUN_TEST(test_cpu_id_csrs_read_zero);
 	RUN_TEST(test_cpu_trigger_csrs_are_hardwired_zero);
 	RUN_TEST(test_cpu_mstatus_reads_zero_after_reset);
