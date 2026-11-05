@@ -38,8 +38,6 @@ if(RISCV_TESTS)
     # A skipped test is still registered, as disabled, so it shows up in the
     # CTest output instead of silently vanishing. Remove the entry when the
     # feature lands.
-    set(RISCV_SKIP_rv32mi-p-illegal
-        "mstatus.MPP accepts S from Milestone 4 step 1, so the test runs its S-mode sections, which need steps 2-5; re-enable after step 5")
     set(RISCV_SKIP_rv32mi-p-pmpaddr
         "we implement zero PMP entries (legal per the spec); the test assumes PMP is present")
 
@@ -75,6 +73,15 @@ if(RISCV_TESTS)
     set_tests_properties(riscv-tests.trace-mode-off PROPERTIES
         FIXTURES_REQUIRED riscv-tests-elfs TIMEOUT 60 LABELS riscv-tests
         FAIL_REGULAR_EXPRESSION "trap:")
+
+    # rv32mi-p-illegal passes through an early exit when S-mode is absent. Check that it really
+    # runs its S-mode sections: it must enter S with MRET and execute a legal SRET, and still pass.
+    add_test(NAME riscv-tests.illegal-runs-s-mode
+             COMMAND ${CMAKE_COMMAND} -E env RISCV_EMU_LOG=debug
+                     $<TARGET_FILE:riscv_emu> "${RISCV_TESTS_BUILD_DIR}/rv32mi-p-illegal")
+    set_tests_properties(riscv-tests.illegal-runs-s-mode PROPERTIES
+        FIXTURES_REQUIRED riscv-tests-elfs TIMEOUT 60 LABELS riscv-tests
+        PASS_REGULAR_EXPRESSION "mret: M -> S.*sret: S -> S.*PASS")
 
     foreach(name ${_names})
         add_test(NAME riscv-tests.${name}
