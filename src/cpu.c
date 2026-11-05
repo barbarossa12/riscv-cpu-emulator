@@ -2,6 +2,11 @@
 #include <stdint.h>
 #include "log.h"
 #include "cpu.h"
+void cpu_reset(CPU *cpu) {
+	*cpu = (CPU){0};
+	cpu->privilege_mode = PRV_M;
+}
+
 uint32_t cpu_read_reg(CPU *cpu, uint8_t index) {
 	if(index > 31) {
 		LOG_FATAL("CPU read register value larger than 32: %d", index);

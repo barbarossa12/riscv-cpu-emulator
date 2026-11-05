@@ -37,11 +37,19 @@
 #define MSTATUS_MPIE (1u << 7)
 #define MSTATUS_MPP  (3u << 11)
 
+// Privilege modes, encoded the same way as mstatus.MPP (the value 2 is reserved)
+typedef enum {
+	PRV_U = 0,
+	PRV_S = 1,
+	PRV_M = 3,
+} PrivMode;
+
 
 typedef struct CPU {
 	uint32_t regs[32];
 	uint32_t pc;
 	uint32_t csr[4096]; // indexed directly by the 12-bit CSR address
+	PrivMode privilege_mode; // current mode. A zeroed CPU is in U-mode, so call cpu_reset()
 
 	uint64_t mcycle;    // behind mcycle/mcycleh and the cycle/cycleh shadows
 	uint64_t minstret;  // behind minstret/minstreth and the instret/instreth shadows
@@ -52,6 +60,9 @@ typedef struct CPU {
 	bool minstret_written;
 	bool trapped;
 } CPU;
+
+// Zero all state and enter M-mode, as at hart reset
+void cpu_reset(CPU *cpu);
 
 uint32_t cpu_read_reg(CPU *cpu, uint8_t index);
 void cpu_write_reg(CPU *cpu, uint8_t index, uint32_t value);
