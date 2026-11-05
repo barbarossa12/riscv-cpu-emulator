@@ -38,10 +38,6 @@ if(RISCV_TESTS)
     # A skipped test is still registered, as disabled, so it shows up in the
     # CTest output instead of silently vanishing. Remove the entry when the
     # feature lands.
-    set(RISCV_SKIP_rv32mi-p-zicntr
-        "cycle/instret counters are not implemented yet")
-    set(RISCV_SKIP_rv32mi-p-instret_overflow
-        "minstret/minstreth are not implemented yet")
     set(RISCV_SKIP_rv32mi-p-pmpaddr
         "we implement zero PMP entries (legal per the spec); the test assumes PMP is present")
 
