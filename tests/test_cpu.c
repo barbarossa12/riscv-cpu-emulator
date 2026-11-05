@@ -72,17 +72,52 @@ void test_cpu_other_csrs_keep_low_bits(void) {
 	TEST_ASSERT_EQUAL_UINT32(0x1003, cpu_read_csr(&test_cpu, CSR_MSCRATCH));
 }
 
-void test_cpu_misa_reports_rv32i(void) {
+void test_cpu_misa_reports_rv32ius(void) {
 	CPU test_cpu = {0};
-	TEST_ASSERT_EQUAL_UINT32(0x40000100, cpu_read_csr(&test_cpu, CSR_MISA));
+	TEST_ASSERT_EQUAL_UINT32(0x40140100, cpu_read_csr(&test_cpu, CSR_MISA)); // MXL=1, I, S, U
 }
 
 void test_cpu_misa_writes_are_ignored(void) {
 	CPU test_cpu = {0};
-	cpu_write_csr(&test_cpu, CSR_MISA, 0xFFFFFFFF); // tries to enable C, S, U, F, ...
-	TEST_ASSERT_EQUAL_UINT32(0x40000100, cpu_read_csr(&test_cpu, CSR_MISA));
+	cpu_write_csr(&test_cpu, CSR_MISA, 0xFFFFFFFF); // tries to enable C, F, ...
+	TEST_ASSERT_EQUAL_UINT32(0x40140100, cpu_read_csr(&test_cpu, CSR_MISA));
 	cpu_write_csr(&test_cpu, CSR_MISA, 0);
-	TEST_ASSERT_EQUAL_UINT32(0x40000100, cpu_read_csr(&test_cpu, CSR_MISA));
+	TEST_ASSERT_EQUAL_UINT32(0x40140100, cpu_read_csr(&test_cpu, CSR_MISA));
+}
+
+void test_cpu_counteren_reads_zero_after_reset(void) {
+	CPU c; cpu_reset(&c);
+	TEST_ASSERT_EQUAL_UINT32(0, cpu_read_csr(&c, CSR_MCOUNTEREN));
+	TEST_ASSERT_EQUAL_UINT32(0, cpu_read_csr(&c, CSR_SCOUNTEREN));
+}
+
+void test_cpu_counteren_writable_bits(void) {
+	/* written -> read back; mcounteren and scounteren behave the same */
+	const struct { uint32_t written, expected; } v[] = {
+		{0x00000000, 0x00000000},
+		{0x00000001, 0x00000001}, // CY
+		{0x00000004, 0x00000004}, // IR
+		{0x00000005, 0x00000005}, // CY | IR
+		{0x00000002, 0x00000000}, // TM: read-only 0 until Milestone 6
+		{0xFFFFFFF8, 0x00000000}, // TM and HPM3..31: read-only 0
+		{0xFFFFFFFF, 0x00000005},
+	};
+	const uint16_t csrs[] = {CSR_MCOUNTEREN, CSR_SCOUNTEREN};
+	for (unsigned c = 0; c < 2; c++) {
+		for (unsigned i = 0; i < sizeof v / sizeof v[0]; i++) {
+			CPU cpu; cpu_reset(&cpu);
+			cpu_write_csr(&cpu, csrs[c], v[i].written);
+			TEST_ASSERT_EQUAL_UINT32(v[i].expected, cpu_read_csr(&cpu, csrs[c]));
+		}
+	}
+}
+
+void test_cpu_counteren_registers_are_independent(void) {
+	CPU c; cpu_reset(&c);
+	cpu_write_csr(&c, CSR_MCOUNTEREN, 0x1);
+	cpu_write_csr(&c, CSR_SCOUNTEREN, 0x4);
+	TEST_ASSERT_EQUAL_UINT32(0x1, cpu_read_csr(&c, CSR_MCOUNTEREN));
+	TEST_ASSERT_EQUAL_UINT32(0x4, cpu_read_csr(&c, CSR_SCOUNTEREN));
 }
 
 void test_cpu_id_csrs_read_zero(void) {
@@ -271,8 +306,11 @@ int main(void) {
 	RUN_TEST(test_cpu_csr_writes_are_independent);
 	RUN_TEST(test_cpu_mtvec_mode_bits_read_as_zero);
 	RUN_TEST(test_cpu_other_csrs_keep_low_bits);
-	RUN_TEST(test_cpu_misa_reports_rv32i);
+	RUN_TEST(test_cpu_misa_reports_rv32ius);
 	RUN_TEST(test_cpu_misa_writes_are_ignored);
+	RUN_TEST(test_cpu_counteren_reads_zero_after_reset);
+	RUN_TEST(test_cpu_counteren_writable_bits);
+	RUN_TEST(test_cpu_counteren_registers_are_independent);
 	RUN_TEST(test_cpu_id_csrs_read_zero);
 	RUN_TEST(test_cpu_trigger_csrs_are_hardwired_zero);
 	RUN_TEST(test_cpu_mstatus_reads_zero_after_reset);
