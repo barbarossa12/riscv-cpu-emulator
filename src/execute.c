@@ -19,6 +19,8 @@ static bool target_misaligned(uint32_t target);
 static bool csr_exists(uint16_t csr_addr);
 static bool csr_is_read_only(uint16_t csr_addr);
 static bool csr_is_debug_only(uint16_t csr_addr);
+static bool csr_privilege_ok(PrivMode mode, uint16_t csr_addr);
+static bool counter_access_ok(CPU *cpu, PrivMode mode, uint16_t csr_addr);
 static bool csr_instr_writes(DecodedInstruction *instr);
 static uint32_t take_branch(CPU *cpu, uint32_t pc, DecodedInstruction *instr);
 
@@ -410,6 +412,12 @@ static uint32_t execute_system(CPU *cpu, Memory *mem, DecodedInstruction *instr,
     if (instr->funct3 != 0 && csr_is_debug_only(csr_addr)) {
         return trap_enter(cpu, pc, 2, instr->raw); // debug-mode-only CSR: illegal instruction
     }
+    if (instr->funct3 != 0 && !csr_privilege_ok(cpu->privilege_mode, csr_addr)) {
+        return trap_enter(cpu, pc, 2, instr->raw); // CSR needs a higher privilege mode
+    }
+    if (instr->funct3 != 0 && !counter_access_ok(cpu, cpu->privilege_mode, csr_addr)) {
+        return trap_enter(cpu, pc, 2, instr->raw); // counter not enabled for this mode
+    }
     if (csr_is_read_only(csr_addr) && csr_instr_writes(instr)) {
         return trap_enter(cpu, pc, 2, instr->raw); // write to a read-only CSR: illegal instruction
     }
@@ -509,10 +517,35 @@ static bool csr_exists(uint16_t csr_addr) {
         case CSR_MVENDORID: case CSR_MARCHID: case CSR_MIMPID: case CSR_MHARTID:
         case CSR_MCYCLE: case CSR_MINSTRET: case CSR_MCYCLEH: case CSR_MINSTRETH:
         case CSR_CYCLE: case CSR_INSTRET: case CSR_CYCLEH: case CSR_INSTRETH:
+        case CSR_MCOUNTEREN: case CSR_SCOUNTEREN:
             return true;
         default:
             return false;
     }
+}
+
+// csr[9:8] is the lowest privilege mode that may access the CSR. The encodings match
+// PrivMode (00 = U, 01 = S, 11 = M); 10 is the hypervisor range, which does not exist.
+static bool csr_privilege_ok(PrivMode mode, uint16_t csr_addr) {
+    return (uint32_t)mode >= ((csr_addr >> 8) & 0x3u);
+}
+
+// cycle/instret and their h halves: S-mode needs the mcounteren bit, U-mode needs both the
+// mcounteren and the scounteren bit. M-mode is never gated.
+static bool counter_access_ok(CPU *cpu, PrivMode mode, uint16_t csr_addr) {
+    uint32_t bit;
+    switch (csr_addr) {
+        case CSR_CYCLE:   case CSR_CYCLEH:   bit = COUNTEREN_CY; break;
+        case CSR_INSTRET: case CSR_INSTRETH: bit = COUNTEREN_IR; break;
+        default: return true;
+    }
+    if (mode == PRV_M) {
+        return true;
+    }
+    if (!(cpu_read_csr(cpu, CSR_MCOUNTEREN) & bit)) {
+        return false;
+    }
+    return mode == PRV_S || (cpu_read_csr(cpu, CSR_SCOUNTEREN) & bit);
 }
 
 // csr[11:10] == 0b11 marks a read-only CSR address
