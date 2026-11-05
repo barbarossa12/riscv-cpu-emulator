@@ -13,7 +13,11 @@
 #define CSR_STVAL    0x143
 #define CSR_SIP      0x144
 #define CSR_SATP     0x180
-#define CSR_MIDELEG  0x303   // the register itself arrives in step 4; sie/sip already depend on it
+#define CSR_MEDELEG  0x302
+#define CSR_MIDELEG  0x303
+#define CSR_MSTATUSH 0x310   // RV32 upper half of mstatus: every field is read-only 0 (little-endian only,
+                             // no H, Zicfilp or Smdbltrp), so it always reads 0
+#define CSR_MEDELEGH 0x312   // upper half of medeleg on RV32: no bits implemented, reads 0
 #define CSR_MIE      0x304
 #define CSR_MTVEC    0x305
 #define CSR_MSCRATCH 0x340
@@ -66,6 +70,11 @@
 #define MSTATUS_MPRV (1u << 17)
 #define MSTATUS_TW   (1u << 21)
 #define MSTATUS_TSR  (1u << 22)
+
+// Exceptions that can be delegated to S-mode: mcause codes 0-9, and the page faults 12, 13, 15.
+// 11 (ECALL from M) and 16 (double trap) can never be delegated.
+#define MEDELEG_WRITABLE 0xB3FFu
+#define MIDELEG_WRITABLE INT_S_ALL
 
 // The part of mstatus that sstatus shows
 #define SSTATUS_MASK (MSTATUS_SIE | MSTATUS_SPIE | MSTATUS_SPP)   // 0x122
