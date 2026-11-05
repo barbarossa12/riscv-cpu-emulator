@@ -422,8 +422,14 @@ static uint32_t execute_system(CPU *cpu, Memory *mem, DecodedInstruction *instr,
         return trap_enter(cpu, pc, 2, instr->raw); // write to a read-only CSR: illegal instruction
     }
     switch (instr->funct3) {
-        case 0x0:
-            if(instr->imm == 0) { // ECALL
+        case 0x0: {
+            // ECALL, EBREAK, MRET, SRET and WFI fix rd and rs1 to 0. SFENCE.VMA fixes rd to 0
+            // and uses rs1 and rs2 for an address and an ASID. Anything else matches no instruction.
+            bool is_sfence_vma = (instr->imm & ~0x1F) == 0x120;   // funct7 = 0001001, imm = funct7:rs2
+            if (instr->rd != 0 || (instr->rs1 != 0 && !is_sfence_vma)) {
+                return trap_enter(cpu, pc, 2, instr->raw);
+            }
+            if (instr->imm == 0) { // ECALL
                 return trap_enter(cpu, pc, ecall_cause(cpu->privilege_mode), 0);
             } else if (instr->imm == 1) { // EBREAK
                 return trap_enter(cpu, pc, 3, 0);
@@ -444,10 +450,37 @@ static uint32_t execute_system(CPU *cpu, Memory *mem, DecodedInstruction *instr,
                 cpu->privilege_mode = prev;
                 LOG_DEBUG("mret: M -> %s, pc 0x%08x", mode_name(prev), cpu_read_csr(cpu, CSR_MEPC));
                 return cpu_read_csr(cpu, CSR_MEPC); // jump back to where the trap occurred
+            } else if (instr->imm == 0x102) { // SRET
+                uint32_t mstatus = cpu_read_csr(cpu, CSR_MSTATUS);
+                if (cpu->privilege_mode == PRV_U ||
+                    (cpu->privilege_mode == PRV_S && (mstatus & MSTATUS_TSR))) {
+                    return trap_enter(cpu, pc, 2, instr->raw); // U never; S only when TSR = 0
+                }
+                PrivMode from = cpu->privilege_mode;
+                PrivMode prev = (mstatus & MSTATUS_SPP) ? PRV_S : PRV_U;
+                uint32_t spie = (mstatus & MSTATUS_SPIE) ? 1 : 0;
+                mstatus &= ~(MSTATUS_SIE | MSTATUS_SPP); // SPP = U, the least-privileged mode
+                mstatus |= spie ? MSTATUS_SIE : 0;       // SIE = old SPIE
+                mstatus |= MSTATUS_SPIE;                 // SPIE = 1
+                mstatus &= ~MSTATUS_MPRV;                // SRET never returns to M
+                cpu_write_csr(cpu, CSR_MSTATUS, mstatus);
+                cpu->privilege_mode = prev;
+                LOG_DEBUG("sret: %s -> %s, pc 0x%08x", mode_name(from), mode_name(prev), cpu_read_csr(cpu, CSR_SEPC));
+                return cpu_read_csr(cpu, CSR_SEPC);
+            } else if (instr->imm == 0x105) { // WFI
+                if (cpu->privilege_mode == PRV_U ||
+                    (cpu->privilege_mode == PRV_S && (cpu_read_csr(cpu, CSR_MSTATUS) & MSTATUS_TW))) {
+                    return trap_enter(cpu, pc, 2, instr->raw); // U never; S only when TW = 0
+                }
+                return pc + 4; // a legal NOP: there is nothing to wait for yet
+            } else if (is_sfence_vma) {
+                if (cpu->privilege_mode != PRV_M) {
+                    return trap_enter(cpu, pc, 2, instr->raw); // satp is read-only 0: illegal in S and U
+                }
+                return pc + 4; // nothing to fence yet
             }
-            LOG_FATAL("unexpected imm for opcode 0x73 funct3 0x0: imm=0x%x", instr->imm);
-
-        break;
+            return trap_enter(cpu, pc, 2, instr->raw); // any other encoding, DRET included, is illegal
+        }
         case 0x1: // CSRRW
         {
             uint32_t rs1_val = cpu_read_reg(cpu, instr->rs1);
