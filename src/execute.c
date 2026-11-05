@@ -518,6 +518,8 @@ static bool csr_exists(uint16_t csr_addr) {
         case CSR_MCYCLE: case CSR_MINSTRET: case CSR_MCYCLEH: case CSR_MINSTRETH:
         case CSR_CYCLE: case CSR_INSTRET: case CSR_CYCLEH: case CSR_INSTRETH:
         case CSR_MCOUNTEREN: case CSR_SCOUNTEREN:
+        case CSR_SSTATUS: case CSR_SIE: case CSR_STVEC: case CSR_SSCRATCH:
+        case CSR_SEPC: case CSR_SCAUSE: case CSR_STVAL: case CSR_SIP: case CSR_SATP:
             return true;
         default:
             return false;
