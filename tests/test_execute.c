@@ -1538,6 +1538,15 @@ void test_csr_read_privilege_by_mode(void) {
         {"tselect",    0x7A002173, true,  true,  false},
         {"mcounteren", 0x30602173, true,  true,  false},
         {"scounteren", 0x10602173, true,  false, false},
+        {"sstatus",    0x10002173, true,  false, false},
+        {"sie",        0x10402173, true,  false, false},
+        {"stvec",      0x10502173, true,  false, false},
+        {"sscratch",   0x14002173, true,  false, false},
+        {"sepc",       0x14102173, true,  false, false},
+        {"scause",     0x14202173, true,  false, false},
+        {"stval",      0x14302173, true,  false, false},
+        {"sip",        0x14402173, true,  false, false},
+        {"satp",       0x18002173, true,  false, false},
         {"cycle",      0xC0002173, false, false, false},
         {"instret",    0xC0202173, false, false, false},
     };
@@ -1596,6 +1605,57 @@ void test_counter_enable_does_not_gate_machine_counters(void) {
     assert_csr_traps(PRV_M, 0, 0, 0xB0002173, false, "mcycle");  // CSRRS x2, mcycle, x0
     assert_csr_traps(PRV_S, 0, 0, 0xB0002173, true,  "mcycle");  // still M-only
     assert_csr_traps(PRV_S, 0, 0, 0x10602173, false, "scounteren"); // S-level CSR
+}
+
+/* ---- S-mode CSRs through real instructions ---------------------------------------------- */
+
+/* Run the single instruction `encoding` at address 0 on `cpu`, which the caller has set up. */
+static void run_on(CPU *cpu, uint32_t encoding) {
+    Memory mem;
+    mem_init(&mem, 16);
+    mem_write32(&mem, 0, encoding);
+    cpu->pc = 0;
+    DecodedInstruction instr = decode_instruction(encoding);
+    execute(cpu, &mem, &instr);
+    mem_free(&mem);
+}
+
+/* satp is read-only 0 until Milestone 5: it never traps in S or M, and a write has no effect. */
+void test_satp_access_does_not_trap_and_stays_zero(void) {
+    const PrivMode modes[] = {PRV_S, PRV_M};
+    for (unsigned i = 0; i < 2; i++) {
+        CPU cpu; test_cpu_reset_in_mode(&cpu, modes[i]);
+        cpu_write_reg(&cpu, 1, 0xFFFFFFFF);
+        run_on(&cpu, 0x18009073);                       // CSRRW x0, satp, x1
+        TEST_ASSERT_EQUAL_UINT32(4, cpu.pc);            // no trap
+        TEST_ASSERT_EQUAL_INT(modes[i], cpu.privilege_mode);
+        run_on(&cpu, 0x18002173);                       // CSRRS x2, satp, x0
+        TEST_ASSERT_EQUAL_UINT32(0, cpu_read_reg(&cpu, 2));
+    }
+}
+
+void test_csrrs_sstatus_sets_sie_in_mstatus(void) {
+    CPU cpu; test_cpu_reset_in_mode(&cpu, PRV_S);
+    cpu_write_reg(&cpu, 1, 0x2);
+    run_on(&cpu, 0x1000A073);                           // CSRRS x0, sstatus, x1
+    TEST_ASSERT_EQUAL_UINT32(4, cpu.pc);
+    TEST_ASSERT_EQUAL_UINT32(0x2, cpu_read_csr(&cpu, CSR_MSTATUS));
+}
+
+void test_csrrc_sstatus_clears_only_s_bits(void) {
+    CPU cpu; test_cpu_reset_in_mode(&cpu, PRV_S);
+    cpu_write_csr(&cpu, CSR_MSTATUS, 0x19AA);           // S bits and M bits set, MPP = M
+    cpu_write_reg(&cpu, 1, 0xFFFFFFFF);
+    run_on(&cpu, 0x1000B073);                           // CSRRC x0, sstatus, x1
+    TEST_ASSERT_EQUAL_UINT32(0x1888, cpu_read_csr(&cpu, CSR_MSTATUS)); // MIE, MPIE, MPP kept
+}
+
+void test_csrrw_sepc_drops_low_bits(void) {
+    CPU cpu; test_cpu_reset_in_mode(&cpu, PRV_S);
+    cpu_write_reg(&cpu, 1, 0x80000003);
+    run_on(&cpu, 0x14109073);                           // CSRRW x0, sepc, x1
+    run_on(&cpu, 0x14102173);                           // CSRRS x2, sepc, x0
+    TEST_ASSERT_EQUAL_UINT32(0x80000000, cpu_read_reg(&cpu, 2));
 }
 
 /* Read-only CSR addresses (csr[11:10] == 0b11), here 0xF14 (mhartid) */
@@ -1712,11 +1772,11 @@ void test_csr_just_above_debug_range_nonexistent_traps(void) {
 
 /* Only implemented CSRs exist: any other address is reserved and traps, reads included */
 void test_csr_read_nonexistent_traps(void) {
-    assert_csr_access_illegal(0x10002173, 0x100, 0); // CSRRS x2, 0x100 (sstatus), x0: no S-mode
+    assert_csr_access_illegal(0x10A02173, 0x10A, 0); // CSRRS x2, 0x10A (senvcfg), x0: optional, absent
 }
 
 void test_csr_write_nonexistent_traps(void) {
-    assert_csr_access_illegal(0x10009073, 0x100, 7); // CSRRW x0, 0x100, x1
+    assert_csr_access_illegal(0x10A09073, 0x10A, 7); // CSRRW x0, 0x10A, x1
 }
 
 void test_csr_read_tcontrol_traps(void) {
@@ -1731,6 +1791,8 @@ void test_csr_read_every_implemented_csr_does_not_trap(void) {
         CSR_MCYCLE, CSR_MINSTRET, CSR_MCYCLEH, CSR_MINSTRETH,
         CSR_CYCLE, CSR_INSTRET, CSR_CYCLEH, CSR_INSTRETH,
         CSR_MCOUNTEREN, CSR_SCOUNTEREN,
+        CSR_SSTATUS, CSR_SIE, CSR_STVEC, CSR_SSCRATCH, CSR_SEPC, CSR_SCAUSE, CSR_STVAL,
+        CSR_SIP, CSR_SATP,
     };
     for (size_t i = 0; i < sizeof(implemented) / sizeof(implemented[0]); i++) {
         CPU cpu; cpu_reset(&cpu);
@@ -2571,6 +2633,10 @@ int main(void) {
     RUN_TEST(test_csr_write_forms_follow_privilege);
     RUN_TEST(test_counter_gating);
     RUN_TEST(test_counter_enable_does_not_gate_machine_counters);
+    RUN_TEST(test_satp_access_does_not_trap_and_stays_zero);
+    RUN_TEST(test_csrrs_sstatus_sets_sie_in_mstatus);
+    RUN_TEST(test_csrrc_sstatus_clears_only_s_bits);
+    RUN_TEST(test_csrrw_sepc_drops_low_bits);
     RUN_TEST(test_csrr_misa_reports_rv32ius);
     RUN_TEST(test_csrr_tdata1_reads_zero);
     RUN_TEST(test_tdata1_write_does_not_read_back);
