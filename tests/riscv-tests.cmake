@@ -38,8 +38,6 @@ if(RISCV_TESTS)
     # A skipped test is still registered, as disabled, so it shows up in the
     # CTest output instead of silently vanishing. Remove the entry when the
     # feature lands.
-    set(RISCV_SKIP_rv32mi-p-pmpaddr
-        "we implement zero PMP entries (legal per the spec); the test assumes PMP is present")
 
     set(_names "")
     foreach(t ${RV32UI_TESTS})
@@ -82,6 +80,22 @@ if(RISCV_TESTS)
     set_tests_properties(riscv-tests.illegal-runs-s-mode PROPERTIES
         FIXTURES_REQUIRED riscv-tests-elfs TIMEOUT 60 LABELS riscv-tests
         PASS_REGULAR_EXPRESSION "mret: M -> S.*sret: S -> S.*PASS")
+
+    # Assembly tests of our own (tests/asm), built like the rv32mi tests and run like them.
+    set(_asm_sources ${CMAKE_SOURCE_DIR}/tests/asm/pmp_denial.S)
+    add_test(NAME riscv-tests.build-asm
+             COMMAND "${CMAKE_SOURCE_DIR}/scripts/build-asm-tests.sh"
+                     "${RISCV_TESTS_SRC_DIR}" "${RISCV_TESTS_BUILD_DIR}" ${_asm_sources})
+    set_tests_properties(riscv-tests.build-asm PROPERTIES
+        FIXTURES_SETUP riscv-tests-elfs TIMEOUT 300)
+
+    # PMP denial, end to end: in U-mode a load, a store and a fetch that hit a no-permission region
+    # must trap with the right cause and mtval (the unit tests cover denial; the official tests only
+    # exercise the allowed path through the harness's allow-all entry).
+    add_test(NAME riscv-tests.pmp-denial
+             COMMAND riscv_emu "${RISCV_TESTS_BUILD_DIR}/pmp_denial")
+    set_tests_properties(riscv-tests.pmp-denial PROPERTIES
+        FIXTURES_REQUIRED riscv-tests-elfs TIMEOUT 60 LABELS riscv-tests)
 
     foreach(name ${_names})
         add_test(NAME riscv-tests.${name}
