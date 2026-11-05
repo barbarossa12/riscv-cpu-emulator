@@ -497,6 +497,8 @@ static bool csr_exists(uint16_t csr_addr) {
         case CSR_MIP:
         case CSR_TSELECT: case CSR_TDATA1: case CSR_TDATA2:
         case CSR_MVENDORID: case CSR_MARCHID: case CSR_MIMPID: case CSR_MHARTID:
+        case CSR_MCYCLE: case CSR_MINSTRET: case CSR_MCYCLEH: case CSR_MINSTRETH:
+        case CSR_CYCLE: case CSR_INSTRET: case CSR_CYCLEH: case CSR_INSTRETH:
             return true;
         default:
             return false;
@@ -545,6 +547,7 @@ static uint32_t take_branch(CPU *cpu, uint32_t pc, DecodedInstruction *instr) {
 }
 
 static uint32_t trap_enter(CPU *cpu, uint32_t pc, uint32_t cause, uint32_t tval) {
+    cpu->trapped = true; // a trapping instruction does not retire (minstret)
     uint32_t mstatus = cpu_read_csr(cpu, CSR_MSTATUS);
     uint32_t mie = (mstatus & MSTATUS_MIE) ? 1 : 0;
     mstatus &= ~(MSTATUS_MPIE | MSTATUS_MIE | MSTATUS_MPP);
@@ -579,11 +582,25 @@ void execute(CPU *cpu, Memory *mem, DecodedInstruction *instr) {
 }
 
 void cpu_step(CPU *cpu, Memory *mem) {
+    cpu->trapped = false;
+    cpu->mcycle_written = false;
+    cpu->minstret_written = false;
+
     uint32_t raw;
     if (!mem_try_read32(mem, cpu->pc, &raw)) {
         cpu->pc = trap_enter(cpu, cpu->pc, 1, cpu->pc); // instruction access fault
-        return;
+    } else {
+        DecodedInstruction instr = decode_instruction(raw);
+        execute(cpu, mem, &instr);
     }
-    DecodedInstruction instr = decode_instruction(raw);
-    execute(cpu, mem, &instr);
+
+    // One cycle per step. An instruction that traps (this includes ECALL and
+    // EBREAK) does not retire, and a counter write takes effect after its own
+    // instruction, so it suppresses that counter's increment.
+    if (!cpu->mcycle_written) {
+        cpu->mcycle++;
+    }
+    if (!cpu->trapped && !cpu->minstret_written) {
+        cpu->minstret++;
+    }
 }
