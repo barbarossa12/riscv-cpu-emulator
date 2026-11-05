@@ -1484,6 +1484,120 @@ static void assert_csr_read_ok(uint32_t encoding, uint16_t csr, uint32_t expecte
     mem_free(&mem);
 }
 
+/* ---- CSR privilege and counter gating ---------------------------------------------------
+ * csr[9:8] is the lowest mode that may access a CSR; cycle/instret (and their h halves) are
+ * further gated by mcounteren (S-mode) and mcounteren & scounteren (U-mode). */
+
+/* Run the single CSR instruction `encoding` at address 0 on a fresh CPU in `mode`. Returns true if
+ * it trapped as an illegal instruction, and checks the trap or no-trap state either way. */
+static bool csr_traps(PrivMode mode, uint32_t mcounteren, uint32_t scounteren, uint32_t encoding) {
+    CPU cpu; test_cpu_reset_in_mode(&cpu, mode);
+    Memory mem;
+    mem_init(&mem, 16);
+    cpu_write_csr(&cpu, CSR_MCOUNTEREN, mcounteren);
+    cpu_write_csr(&cpu, CSR_SCOUNTEREN, scounteren);
+    cpu_write_csr(&cpu, CSR_MTVEC, 0x1000);
+    cpu_write_csr(&cpu, CSR_MCAUSE, 0x77);     // marker: only a trap overwrites it
+    cpu_write_reg(&cpu, 2, 0xDEADBEEF);
+    mem_write32(&mem, 0, encoding);
+
+    DecodedInstruction instr = decode_instruction(encoding);
+    execute(&cpu, &mem, &instr);
+
+    bool trapped = cpu_read_csr(&cpu, CSR_MCAUSE) == 2;
+    if (trapped) {
+        TEST_ASSERT_EQUAL_INT(PRV_M, cpu.privilege_mode);
+        TEST_ASSERT_EQUAL_UINT32(0x1000, cpu.pc);
+        TEST_ASSERT_EQUAL_UINT32(encoding, cpu_read_csr(&cpu, CSR_MTVAL));
+        TEST_ASSERT_EQUAL_UINT32(0, cpu_read_csr(&cpu, CSR_MEPC));
+        TEST_ASSERT_EQUAL_UINT32(0xDEADBEEF, cpu_read_reg(&cpu, 2)); // rd untouched
+        TEST_ASSERT_EQUAL_UINT32((uint32_t)mode << 11, cpu_read_csr(&cpu, CSR_MSTATUS) & MSTATUS_MPP);
+    } else {
+        TEST_ASSERT_EQUAL_UINT32(0x77, cpu_read_csr(&cpu, CSR_MCAUSE));
+        TEST_ASSERT_EQUAL_UINT32(4, cpu.pc);
+        TEST_ASSERT_EQUAL_INT(mode, cpu.privilege_mode);
+    }
+    mem_free(&mem);
+    return trapped;
+}
+
+static void assert_csr_traps(PrivMode mode, uint32_t m, uint32_t s, uint32_t encoding, bool expected, const char *what) {
+    char msg[96];
+    snprintf(msg, sizeof msg, "%s, mode %d, mcounteren 0x%x, scounteren 0x%x", what, (int)mode, m, s);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(expected, csr_traps(mode, m, s, encoding), msg);
+}
+
+/* CSRRS x2, csr, x0 reads the CSR without writing it. Counter-enable bits are all set, so only
+ * the privilege level decides. */
+void test_csr_read_privilege_by_mode(void) {
+    const struct { const char *name; uint32_t encoding; bool u, s, m; } v[] = {
+        {"mstatus",    0x30002173, true,  true,  false},
+        {"mscratch",   0x34002173, true,  true,  false},
+        {"mcycle",     0xB0002173, true,  true,  false},
+        {"mvendorid",  0xF1102173, true,  true,  false},
+        {"tselect",    0x7A002173, true,  true,  false},
+        {"mcounteren", 0x30602173, true,  true,  false},
+        {"scounteren", 0x10602173, true,  false, false},
+        {"cycle",      0xC0002173, false, false, false},
+        {"instret",    0xC0202173, false, false, false},
+    };
+    for (unsigned i = 0; i < sizeof v / sizeof v[0]; i++) {
+        assert_csr_traps(PRV_U, 0x5, 0x5, v[i].encoding, v[i].u, v[i].name);
+        assert_csr_traps(PRV_S, 0x5, 0x5, v[i].encoding, v[i].s, v[i].name);
+        assert_csr_traps(PRV_M, 0x5, 0x5, v[i].encoding, v[i].m, v[i].name);
+    }
+}
+
+/* The write forms follow the same rule: mscratch (0x340) needs M-mode. */
+void test_csr_write_forms_follow_privilege(void) {
+    const struct { const char *name; uint32_t encoding; } v[] = {
+        {"CSRRW x0, mscratch, x1", 0x34009073},
+        {"CSRRWI x0, mscratch, 1", 0x3400D073},
+        {"CSRRSI x0, mscratch, 1", 0x3400E073},
+    };
+    for (unsigned i = 0; i < sizeof v / sizeof v[0]; i++) {
+        assert_csr_traps(PRV_U, 0, 0, v[i].encoding, true,  v[i].name);
+        assert_csr_traps(PRV_S, 0, 0, v[i].encoding, true,  v[i].name);
+        assert_csr_traps(PRV_M, 0, 0, v[i].encoding, false, v[i].name);
+    }
+}
+
+/* (mcounteren, scounteren) -> does the read trap, from S then from U. M-mode never traps. */
+void test_counter_gating(void) {
+    const struct {
+        uint32_t m, s;
+        bool cycle_s, cycle_u, instret_s, instret_u;
+    } v[] = {
+        {0x5, 0x5, false, false, false, false},
+        {0x0, 0x5, true,  true,  true,  true },
+        {0x5, 0x0, false, true,  false, true },
+        {0x1, 0x5, false, false, true,  true },
+        {0x4, 0x5, true,  true,  false, false},
+        {0x5, 0x4, false, true,  false, false},
+    };
+    for (unsigned i = 0; i < sizeof v / sizeof v[0]; i++) {
+        /* cycle and cycleh share the CY bit; instret and instreth share the IR bit */
+        const uint32_t cycle[]   = {0xC0002173, 0xC8002173};
+        const uint32_t instret[] = {0xC0202173, 0xC8202173};
+        for (unsigned h = 0; h < 2; h++) {
+            assert_csr_traps(PRV_S, v[i].m, v[i].s, cycle[h],   v[i].cycle_s,   "cycle");
+            assert_csr_traps(PRV_U, v[i].m, v[i].s, cycle[h],   v[i].cycle_u,   "cycle");
+            assert_csr_traps(PRV_S, v[i].m, v[i].s, instret[h], v[i].instret_s, "instret");
+            assert_csr_traps(PRV_U, v[i].m, v[i].s, instret[h], v[i].instret_u, "instret");
+            assert_csr_traps(PRV_M, v[i].m, v[i].s, cycle[h],   false, "cycle");
+            assert_csr_traps(PRV_M, v[i].m, v[i].s, instret[h], false, "instret");
+        }
+    }
+}
+
+/* Gating applies to reads only through the counter CSRs: the machine counters are not gated
+ * by mcounteren, and scounteren is reachable from S-mode. */
+void test_counter_enable_does_not_gate_machine_counters(void) {
+    assert_csr_traps(PRV_M, 0, 0, 0xB0002173, false, "mcycle");  // CSRRS x2, mcycle, x0
+    assert_csr_traps(PRV_S, 0, 0, 0xB0002173, true,  "mcycle");  // still M-only
+    assert_csr_traps(PRV_S, 0, 0, 0x10602173, false, "scounteren"); // S-level CSR
+}
+
 /* Read-only CSR addresses (csr[11:10] == 0b11), here 0xF14 (mhartid) */
 void test_csrrw_read_only_csr_traps(void) {
     assert_csr_access_illegal(0xF1409073, 0xF14, 7); // CSRRW x0, mhartid, x1
@@ -1616,6 +1730,7 @@ void test_csr_read_every_implemented_csr_does_not_trap(void) {
         CSR_MARCHID, CSR_MIMPID, CSR_MHARTID,
         CSR_MCYCLE, CSR_MINSTRET, CSR_MCYCLEH, CSR_MINSTRETH,
         CSR_CYCLE, CSR_INSTRET, CSR_CYCLEH, CSR_INSTRETH,
+        CSR_MCOUNTEREN, CSR_SCOUNTEREN,
     };
     for (size_t i = 0; i < sizeof(implemented) / sizeof(implemented[0]); i++) {
         CPU cpu; cpu_reset(&cpu);
@@ -1634,7 +1749,7 @@ void test_csr_read_every_implemented_csr_does_not_trap(void) {
     }
 }
 
-void test_csrr_misa_reports_rv32i(void) {
+void test_csrr_misa_reports_rv32ius(void) {
     assert_csr_read_ok(0x30102173, CSR_MISA, MISA_VALUE); // CSRRS x2, misa, x0
 }
 
@@ -2452,7 +2567,11 @@ int main(void) {
     RUN_TEST(test_csr_write_nonexistent_traps);
     RUN_TEST(test_csr_read_tcontrol_traps);
     RUN_TEST(test_csr_read_every_implemented_csr_does_not_trap);
-    RUN_TEST(test_csrr_misa_reports_rv32i);
+    RUN_TEST(test_csr_read_privilege_by_mode);
+    RUN_TEST(test_csr_write_forms_follow_privilege);
+    RUN_TEST(test_counter_gating);
+    RUN_TEST(test_counter_enable_does_not_gate_machine_counters);
+    RUN_TEST(test_csrr_misa_reports_rv32ius);
     RUN_TEST(test_csrr_tdata1_reads_zero);
     RUN_TEST(test_tdata1_write_does_not_read_back);
     RUN_TEST(test_cpu_step_executes_fetched_instruction);
