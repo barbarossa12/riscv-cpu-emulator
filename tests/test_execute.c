@@ -1973,6 +1973,71 @@ void test_standard_system_words_still_work(void) {
     TEST_ASSERT_EQUAL_UINT32(0x80, cpu.pc);
 }
 
+/* ---- Round trips: trap, handler, return, through cpu_step ------------------------------- */
+
+#define ADDI_X6_X0_7   0x00700313u   /* addi x6, x0, 7 */
+#define ADDI_X5_X5_4   0x00428293u   /* addi x5, x5, 4 */
+#define CSRR_X5_SEPC   0x141022F3u
+#define CSRW_SEPC_X5   0x14129073u
+#define CSRR_X5_MEPC   0x341022F3u
+#define CSRW_MEPC_X5   0x34129073u
+
+/* ECALL at 0, then `addi x6, x0, 7` at 4. A four-instruction handler at 0x100 reads the return
+ * address (xepc), adds 4, writes it back and returns (xret). Six cpu_steps: the ecall, the four
+ * handler instructions, and the addi. The ecall traps, so it does not retire: minstret is 5. */
+static void run_round_trip(CPU *cpu, uint32_t csr_read, uint32_t csr_write, uint32_t xret,
+                           PrivMode mode_in_handler) {
+    Memory mem;
+    mem_init(&mem, 0x200);
+    mem_write32(&mem, 0, ECALL_WORD);
+    mem_write32(&mem, 4, ADDI_X6_X0_7);
+    mem_write32(&mem, 0x100, csr_read);
+    mem_write32(&mem, 0x104, ADDI_X5_X5_4);
+    mem_write32(&mem, 0x108, csr_write);
+    mem_write32(&mem, 0x10C, xret);
+
+    cpu_step(cpu, &mem);                              // the ecall
+    TEST_ASSERT_EQUAL_INT(mode_in_handler, cpu->privilege_mode);
+    TEST_ASSERT_EQUAL_UINT32(0x100, cpu->pc);
+    for (int i = 0; i < 5; i++) {
+        cpu_step(cpu, &mem);                          // csrr, addi, csrw, xret, addi
+    }
+    mem_free(&mem);
+
+    TEST_ASSERT_EQUAL_UINT32(7, cpu_read_reg(cpu, 6));          // the code after the ecall ran
+    TEST_ASSERT_EQUAL_UINT32(8, cpu->pc);
+    TEST_ASSERT_EQUAL_UINT64(6, cpu->mcycle);
+    TEST_ASSERT_EQUAL_UINT64(5, cpu->minstret);
+}
+
+void test_round_trip_u_to_s_and_back(void) {
+    CPU cpu; test_cpu_reset_in_mode(&cpu, PRV_U);
+    cpu_write_csr(&cpu, CSR_MEDELEG, 0x100);          // ECALL from U goes to S
+    cpu_write_csr(&cpu, CSR_STVEC, 0x100);
+    cpu_write_csr(&cpu, CSR_MTVEC, 0x1000);
+    run_round_trip(&cpu, CSRR_X5_SEPC, CSRW_SEPC_X5, SRET_WORD, PRV_S);
+    TEST_ASSERT_EQUAL_INT(PRV_U, cpu.privilege_mode);
+    TEST_ASSERT_EQUAL_UINT32(0x20, cpu_read_csr(&cpu, CSR_SSTATUS));   // SPIE = 1, SPP = U
+}
+
+void test_round_trip_s_to_s(void) {
+    CPU cpu; test_cpu_reset_in_mode(&cpu, PRV_S);
+    cpu_write_csr(&cpu, CSR_MEDELEG, 0x200);          // ECALL from S stays in S
+    cpu_write_csr(&cpu, CSR_STVEC, 0x100);
+    cpu_write_csr(&cpu, CSR_MTVEC, 0x1000);
+    run_round_trip(&cpu, CSRR_X5_SEPC, CSRW_SEPC_X5, SRET_WORD, PRV_S);
+    TEST_ASSERT_EQUAL_INT(PRV_S, cpu.privilege_mode);
+    TEST_ASSERT_EQUAL_UINT32(0x20, cpu_read_csr(&cpu, CSR_SSTATUS));   // SRET cleared SPP again
+}
+
+void test_round_trip_u_to_m_and_back(void) {
+    CPU cpu; test_cpu_reset_in_mode(&cpu, PRV_U);
+    cpu_write_csr(&cpu, CSR_MTVEC, 0x100);            // nothing delegated
+    run_round_trip(&cpu, CSRR_X5_MEPC, CSRW_MEPC_X5, MRET_WORD, PRV_M);
+    TEST_ASSERT_EQUAL_INT(PRV_U, cpu.privilege_mode);
+    TEST_ASSERT_EQUAL_UINT32(0x80, cpu_read_csr(&cpu, CSR_MSTATUS));   // MPIE = 1, MPP = U
+}
+
 /* Read-only CSR addresses (csr[11:10] == 0b11), here 0xF14 (mhartid) */
 void test_csrrw_read_only_csr_traps(void) {
     assert_csr_access_illegal(0xF1409073, 0xF14, 7); // CSRRW x0, mhartid, x1
@@ -2968,6 +3033,9 @@ int main(void) {
     RUN_TEST(test_unknown_system_encodings_are_illegal);
     RUN_TEST(test_reserved_rd_and_rs1_fields_are_illegal);
     RUN_TEST(test_standard_system_words_still_work);
+    RUN_TEST(test_round_trip_u_to_s_and_back);
+    RUN_TEST(test_round_trip_s_to_s);
+    RUN_TEST(test_round_trip_u_to_m_and_back);
     RUN_TEST(test_csrr_misa_reports_rv32ius);
     RUN_TEST(test_csrr_tdata1_reads_zero);
     RUN_TEST(test_tdata1_write_does_not_read_back);
