@@ -1613,6 +1613,8 @@ void test_csr_read_every_implemented_csr_does_not_trap(void) {
         CSR_MSTATUS, CSR_MISA, CSR_MIE, CSR_MTVEC, CSR_MSCRATCH, CSR_MEPC, CSR_MCAUSE,
         CSR_MTVAL, CSR_MIP, CSR_TSELECT, CSR_TDATA1, CSR_TDATA2, CSR_MVENDORID,
         CSR_MARCHID, CSR_MIMPID, CSR_MHARTID,
+        CSR_MCYCLE, CSR_MINSTRET, CSR_MCYCLEH, CSR_MINSTRETH,
+        CSR_CYCLE, CSR_INSTRET, CSR_CYCLEH, CSR_INSTRETH,
     };
     for (size_t i = 0; i < sizeof(implemented) / sizeof(implemented[0]); i++) {
         CPU cpu = {0};
@@ -1944,6 +1946,273 @@ void test_mret_leaves_mpp_as_m(void) {
     mem_free(&mem);
 }
 
+/* ---- Counters (mcycle/minstret and their user-level shadows) ---------------------------
+ * cpu_step adds one to mcycle every step and one to minstret only when the instruction
+ * retires: a trap (ECALL and EBREAK included) does not retire, and a write to a counter
+ * suppresses that counter's own increment. */
+static void load_nops(Memory *mem, int count) {
+    for (int i = 0; i < count; i++) {
+        mem_write32(mem, (uint32_t)(4 * i), 0x00000013); // NOP
+    }
+}
+
+/* Run one CSR read with execute() and return rd (x2). */
+static uint32_t read_via_csrr(CPU *cpu, uint32_t encoding) {
+    Memory mem;
+    mem_init(&mem, 16);
+    mem_write32(&mem, 0, encoding);
+    cpu->pc = 0;
+    cpu_write_reg(cpu, 2, 0xDEADBEEF);
+    DecodedInstruction instr = decode_instruction(mem_read32(&mem, 0));
+    execute(cpu, &mem, &instr);
+    mem_free(&mem);
+    return cpu_read_reg(cpu, 2);
+}
+
+void test_counters_advance_one_per_instruction(void) {
+    CPU cpu = {0};
+    Memory mem;
+    mem_init(&mem, 64);
+    load_nops(&mem, 3);
+
+    for (int i = 0; i < 3; i++) {
+        cpu_step(&cpu, &mem);
+    }
+
+    TEST_ASSERT_EQUAL_UINT64(3, cpu.mcycle);
+    TEST_ASSERT_EQUAL_UINT64(3, cpu.minstret);
+    mem_free(&mem);
+}
+
+void test_counter_read_returns_count_before_itself(void) {
+    CPU cpu = {0};
+    Memory mem;
+    mem_init(&mem, 64);
+    load_nops(&mem, 3);
+    mem_write32(&mem, 12, 0xB0202173); // CSRRS x2, minstret, x0
+
+    for (int i = 0; i < 4; i++) {
+        cpu_step(&cpu, &mem);
+    }
+
+    TEST_ASSERT_EQUAL_UINT32(3, cpu_read_reg(&cpu, 2)); // the three NOPs, not itself
+    TEST_ASSERT_EQUAL_UINT64(4, cpu.minstret);          // it retires after reading
+    mem_free(&mem);
+}
+
+void test_counter_shadows_read_the_machine_counters(void) {
+    CPU cpu = {0};
+    cpu.mcycle = 0x0000000100000005ull;
+    cpu.minstret = 0x0000000200000009ull;
+
+    TEST_ASSERT_EQUAL_UINT32(5, read_via_csrr(&cpu, 0xC0002173));    // cycle
+    TEST_ASSERT_EQUAL_UINT32(1, read_via_csrr(&cpu, 0xC8002173));   // cycleh
+    TEST_ASSERT_EQUAL_UINT32(9, read_via_csrr(&cpu, 0xC0202173));  // instret
+    TEST_ASSERT_EQUAL_UINT32(2, read_via_csrr(&cpu, 0xC8202173)); // instreth
+}
+
+void test_csrrw_writes_a_machine_counter(void) {
+    CPU cpu = {0};
+    Memory mem;
+    mem_init(&mem, 16);
+    mem_write32(&mem, 0, 0xB0009073); // CSRRW x0, mcycle, x1
+    cpu_write_reg(&cpu, 1, 0x1234);
+
+    DecodedInstruction instr = decode_instruction(mem_read32(&mem, 0));
+    execute(&cpu, &mem, &instr);
+
+    TEST_ASSERT_EQUAL_UINT64(0x1234, cpu.mcycle);
+    mem_free(&mem);
+}
+
+void test_illegal_instruction_does_not_retire(void) {
+    CPU cpu = {0};
+    Memory mem;
+    mem_init(&mem, 16);
+    cpu_write_csr(&cpu, CSR_MTVEC, 0x1000);
+    mem_write32(&mem, 0, 0x00000000); // all zeros: illegal
+
+    cpu_step(&cpu, &mem);
+
+    TEST_ASSERT_EQUAL_UINT64(1, cpu.mcycle);   // it still took a cycle
+    TEST_ASSERT_EQUAL_UINT64(0, cpu.minstret); // but did not retire
+    mem_free(&mem);
+}
+
+void test_ecall_does_not_retire(void) {
+    CPU cpu = {0};
+    Memory mem;
+    mem_init(&mem, 16);
+    cpu_write_csr(&cpu, CSR_MTVEC, 0x1000);
+    mem_write32(&mem, 0, 0x00000073); // ECALL
+
+    cpu_step(&cpu, &mem);
+
+    TEST_ASSERT_EQUAL_UINT64(1, cpu.mcycle);
+    TEST_ASSERT_EQUAL_UINT64(0, cpu.minstret);
+    mem_free(&mem);
+}
+
+void test_ebreak_does_not_retire(void) {
+    CPU cpu = {0};
+    Memory mem;
+    mem_init(&mem, 16);
+    cpu_write_csr(&cpu, CSR_MTVEC, 0x1000);
+    mem_write32(&mem, 0, 0x00100073); // EBREAK
+
+    cpu_step(&cpu, &mem);
+
+    TEST_ASSERT_EQUAL_UINT64(1, cpu.mcycle);
+    TEST_ASSERT_EQUAL_UINT64(0, cpu.minstret);
+    mem_free(&mem);
+}
+
+void test_fetch_fault_does_not_retire(void) {
+    CPU cpu = {0};
+    Memory mem;
+    mem_init(&mem, 16);
+    cpu_write_csr(&cpu, CSR_MTVEC, 0x1000);
+    cpu.pc = 0x1000; // outside memory
+
+    cpu_step(&cpu, &mem);
+
+    TEST_ASSERT_EQUAL_UINT64(1, cpu.mcycle);
+    TEST_ASSERT_EQUAL_UINT64(0, cpu.minstret);
+    mem_free(&mem);
+}
+
+void test_trapping_csr_instruction_does_not_retire(void) {
+    CPU cpu = {0};
+    Memory mem;
+    mem_init(&mem, 16);
+    cpu_write_csr(&cpu, CSR_MTVEC, 0x1000);
+    mem_write32(&mem, 0, 0xC0009073); // CSRRW x0, cycle, x1: read-only, traps
+
+    cpu_step(&cpu, &mem);
+
+    TEST_ASSERT_EQUAL_UINT64(0, cpu.minstret);
+    mem_free(&mem);
+}
+
+void test_mret_retires(void) {
+    CPU cpu = {0};
+    Memory mem;
+    mem_init(&mem, 16);
+    mem_write32(&mem, 0, 0x30200073); // MRET
+
+    cpu_step(&cpu, &mem);
+
+    TEST_ASSERT_EQUAL_UINT64(1, cpu.minstret);
+    mem_free(&mem);
+}
+
+void test_minstret_write_suppresses_its_own_increment(void) {
+    CPU cpu = {0};
+    Memory mem;
+    mem_init(&mem, 16);
+    cpu.minstret = 5;
+    mem_write32(&mem, 0, 0xB0205073); // CSRRWI x0, minstret, 0
+    mem_write32(&mem, 4, 0xB0202173); // CSRRS x2, minstret, x0
+
+    cpu_step(&cpu, &mem);
+    cpu_step(&cpu, &mem);
+
+    TEST_ASSERT_EQUAL_UINT32(0, cpu_read_reg(&cpu, 2)); // the written value, not written + 1
+    TEST_ASSERT_EQUAL_UINT64(1, cpu.minstret);          // the read retired normally
+    mem_free(&mem);
+}
+
+void test_mcycle_write_suppresses_its_own_increment(void) {
+    CPU cpu = {0};
+    Memory mem;
+    mem_init(&mem, 16);
+    cpu.mcycle = 5;
+    mem_write32(&mem, 0, 0xB0005073);  // CSRRWI x0, mcycle, 0
+    mem_write32(&mem, 4, 0xB0002173);  // CSRRS x2, mcycle, x0
+
+    cpu_step(&cpu, &mem);
+    cpu_step(&cpu, &mem);
+
+    TEST_ASSERT_EQUAL_UINT32(0, cpu_read_reg(&cpu, 2));
+    TEST_ASSERT_EQUAL_UINT64(1, cpu.mcycle);
+    mem_free(&mem);
+}
+
+void test_minstret_wraps_at_64_bits(void) {
+    CPU cpu = {0};
+    Memory mem;
+    mem_init(&mem, 16);
+    cpu.minstret = 0xFFFFFFFFFFFFFFFFull;
+    load_nops(&mem, 1);
+
+    cpu_step(&cpu, &mem);
+
+    TEST_ASSERT_EQUAL_UINT64(0, cpu.minstret);
+    mem_free(&mem);
+}
+
+/* The carry out of the low half must reach the high half (a 32-bit counter would drop it). */
+void test_minstret_carries_into_the_high_half(void) {
+    CPU cpu = {0};
+    Memory mem;
+    mem_init(&mem, 16);
+    cpu.minstret = 0x00000000FFFFFFFFull;
+    load_nops(&mem, 1);
+
+    cpu_step(&cpu, &mem);
+
+    TEST_ASSERT_EQUAL_UINT64(0x0000000100000000ull, cpu.minstret);
+    TEST_ASSERT_EQUAL_UINT32(0, cpu_read_csr(&cpu, CSR_MINSTRET));
+    TEST_ASSERT_EQUAL_UINT32(1, cpu_read_csr(&cpu, CSR_MINSTRETH));
+    mem_free(&mem);
+}
+
+void test_mcycle_carries_into_the_high_half(void) {
+    CPU cpu = {0};
+    Memory mem;
+    mem_init(&mem, 16);
+    cpu.mcycle = 0x00000000FFFFFFFFull;
+    load_nops(&mem, 1);
+
+    cpu_step(&cpu, &mem);
+
+    TEST_ASSERT_EQUAL_UINT64(0x0000000100000000ull, cpu.mcycle);
+    TEST_ASSERT_EQUAL_UINT32(1, cpu_read_csr(&cpu, CSR_MCYCLEH));
+    mem_free(&mem);
+}
+
+/* The sequence in riscv-tests instret_overflow.S: write all ones to both halves, then one
+ * retired instruction wraps the 64-bit counter to zero. */
+void test_instret_overflow_sequence(void) {
+    CPU cpu = {0};
+    Memory mem;
+    mem_init(&mem, 64);
+    mem_write32(&mem, 0,  0xFFF00293);                 // ADDI x5, x0, -1
+    mem_write32(&mem, 4,  0xB0229073);         // CSRRW x0, minstret, x5
+    mem_write32(&mem, 8,  0xB8229073);        // CSRRW x0, minstreth, x5
+    mem_write32(&mem, 12, 0x00000013);                 // NOP
+    mem_write32(&mem, 16, 0xB0202173);         // CSRRS x2, minstret, x0
+    mem_write32(&mem, 20, 0xB8202173);        // CSRRS x2, minstreth, x0 (overwrites x2)
+
+    for (int i = 0; i < 5; i++) {
+        cpu_step(&cpu, &mem);
+    }
+    TEST_ASSERT_EQUAL_UINT32(0, cpu_read_reg(&cpu, 2)); // minstret wrapped to 0
+
+    cpu_step(&cpu, &mem);
+    TEST_ASSERT_EQUAL_UINT32(0, cpu_read_reg(&cpu, 2)); // and so did minstreth
+    mem_free(&mem);
+}
+
+/* The user-level shadows are read-only addresses: writing them is an illegal instruction */
+void test_counter_shadow_write_traps(void) {
+    assert_csr_access_illegal(0xC0009073, CSR_CYCLE, 7);       // CSRRW x0, cycle, x1
+}
+
+void test_counter_high_shadow_write_traps(void) {
+    assert_csr_access_illegal(0xC8209073, CSR_INSTRETH, 7); // CSRRW x0, instreth, x1
+}
+
 void test_mret_returns_to_mepc(void) {
     CPU cpu = {0};
     Memory mem;
@@ -2118,6 +2387,24 @@ int main(void) {
     RUN_TEST(test_mstatus_mpp_probe_reads_back_m);
     RUN_TEST(test_mstatus_csrrw_cannot_clear_mpp);
     RUN_TEST(test_mret_leaves_mpp_as_m);
+    RUN_TEST(test_counters_advance_one_per_instruction);
+    RUN_TEST(test_counter_read_returns_count_before_itself);
+    RUN_TEST(test_counter_shadows_read_the_machine_counters);
+    RUN_TEST(test_csrrw_writes_a_machine_counter);
+    RUN_TEST(test_illegal_instruction_does_not_retire);
+    RUN_TEST(test_ecall_does_not_retire);
+    RUN_TEST(test_ebreak_does_not_retire);
+    RUN_TEST(test_fetch_fault_does_not_retire);
+    RUN_TEST(test_trapping_csr_instruction_does_not_retire);
+    RUN_TEST(test_mret_retires);
+    RUN_TEST(test_minstret_write_suppresses_its_own_increment);
+    RUN_TEST(test_mcycle_write_suppresses_its_own_increment);
+    RUN_TEST(test_minstret_wraps_at_64_bits);
+    RUN_TEST(test_minstret_carries_into_the_high_half);
+    RUN_TEST(test_mcycle_carries_into_the_high_half);
+    RUN_TEST(test_instret_overflow_sequence);
+    RUN_TEST(test_counter_shadow_write_traps);
+    RUN_TEST(test_counter_high_shadow_write_traps);
     RUN_TEST(test_mret_returns_to_mepc);
     RUN_TEST(test_mret_restores_mie_from_mpie);
 	return UNITY_END();
