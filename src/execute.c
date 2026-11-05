@@ -97,8 +97,40 @@ static uint32_t execute_op_imm(CPU *cpu, Memory *mem, DecodedInstruction *instr,
     return pc + 4;
 }
 
+static uint32_t mulhu(uint32_t a, uint32_t b) {
+    return (uint32_t)(((uint64_t)a * b) >> 32);
+}
+
+// M extension (funct7 = 0000001): MUL, MULH, MULHSU, MULHU, DIV, DIVU, REM, REMU
+static uint32_t muldiv(uint32_t funct3, uint32_t a, uint32_t b) {
+    bool a_neg = (a & 0x80000000u) != 0;
+    bool b_neg = (b & 0x80000000u) != 0;
+    switch (funct3) {
+        case 0x0: return a * b;                                           // MUL: low 32 bits
+        case 0x1: return mulhu(a, b) - (a_neg ? b : 0) - (b_neg ? a : 0); // MULH: signed x signed
+        case 0x2: return mulhu(a, b) - (a_neg ? b : 0);                   // MULHSU: signed x unsigned
+        case 0x3: return mulhu(a, b);                                     // MULHU
+        case 0x4:                                                         // DIV
+            if (b == 0) return 0xFFFFFFFFu;                               // division by zero: all ones
+            if (a == 0x80000000u && b == 0xFFFFFFFFu) return a;           // overflow: -2^31 / -1
+            return (uint32_t)((int32_t)a / (int32_t)b);
+        case 0x5: return b == 0 ? 0xFFFFFFFFu : a / b;                    // DIVU
+        case 0x6:                                                         // REM
+            if (b == 0) return a;                                         // remainder of x / 0 is x
+            if (a == 0x80000000u && b == 0xFFFFFFFFu) return 0;           // overflow: remainder 0
+            return (uint32_t)((int32_t)a % (int32_t)b);
+        default:  return b == 0 ? a : a % b;                              // REMU
+    }
+}
+
 static uint32_t execute_op(CPU *cpu, Memory *mem, DecodedInstruction *instr, uint32_t pc) {
     (void)mem;
+    if (instr->funct7 == 0x01) {             // M extension: all eight funct3 values are valid
+        uint32_t a = cpu_read_reg(cpu, instr->rs1);
+        uint32_t b = cpu_read_reg(cpu, instr->rs2);
+        cpu_write_reg(cpu, instr->rd, muldiv(instr->funct3, a, b));
+        return pc + 4;
+    }
     // funct7 is 0x00 for every OP instruction except SUB and SRA, which use 0x20
     bool uses_alt = (instr->funct3 == 0x0 || instr->funct3 == 0x5);
     if (instr->funct7 != 0x00 && !(uses_alt && instr->funct7 == 0x20)) {
