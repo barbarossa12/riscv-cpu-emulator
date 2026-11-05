@@ -1794,6 +1794,185 @@ void test_delegation_csrs_through_instructions(void) {
     TEST_ASSERT_EQUAL_UINT32(0x222, cpu_read_csr(&cpu, CSR_MIDELEG));
 }
 
+/* ---- SRET, WFI, SFENCE.VMA and reserved encodings --------------------------------------- */
+
+#define SRET_WORD       0x10200073u
+#define WFI_WORD        0x10500073u
+#define SFENCE_X0_X0    0x12000073u   /* SFENCE.VMA x0, x0 */
+#define SFENCE_X1_X2    0x12208073u   /* SFENCE.VMA x1, x2 */
+#define MRET_WORD       0x30200073u
+#define EBREAK_WORD     0x00100073u
+#define DRET_WORD       0x7B200073u
+
+/* The word at pc 0x40 traps as an illegal instruction in `mode`: mcause 2, mtval = the word,
+ * taken in M with MPP = the mode it ran in, and nothing else changed. */
+static void assert_illegal_in_mode(PrivMode mode, uint32_t mstatus, uint32_t raw, const char *what) {
+    char msg[96];
+    snprintf(msg, sizeof msg, "%s (mode %d, word 0x%08x)", what, (int)mode, raw);
+    CPU cpu; test_cpu_reset_in_mode(&cpu, mode);
+    cpu_write_csr(&cpu, CSR_MSTATUS, mstatus);
+    cpu_write_reg(&cpu, 1, 0x1234);
+    run_trap_case(&cpu, raw);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(PRV_M, cpu.privilege_mode, msg);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0x1000, cpu.pc, msg);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(2, cpu_read_csr(&cpu, CSR_MCAUSE), msg);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(raw, cpu_read_csr(&cpu, CSR_MTVAL), msg);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0x40, cpu_read_csr(&cpu, CSR_MEPC), msg);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE((uint32_t)mode << 11, cpu_read_csr(&cpu, CSR_MSTATUS) & MSTATUS_MPP, msg);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0x1234, cpu_read_reg(&cpu, 1), msg);   // no register changed
+}
+
+/* (mode, mstatus before) -> (mode after, mstatus after); sepc = 0x40. A trap row has no result. */
+void test_sret_table(void) {
+    const struct {
+        const char *name;
+        PrivMode mode; uint32_t mstatus;
+        bool traps; PrivMode after; uint32_t mstatus_after;
+    } v[] = {
+        {"S, SPP=1 SPIE=1",          PRV_S, 0x000120, false, PRV_S, 0x000022},
+        {"S, SPP=0",                 PRV_S, 0x000000, false, PRV_U, 0x000020},
+        {"M, SPP=0 SPIE=1 MPRV",     PRV_M, 0x020020, false, PRV_U, 0x000022},
+        {"M, SPP=1 MPRV",            PRV_M, 0x020100, false, PRV_S, 0x000020},
+        {"M, TSR set still allowed", PRV_M, 0x400120, false, PRV_S, 0x400022},
+        {"S, TSR set",               PRV_S, 0x400120, true,  0,     0},
+        {"U",                        PRV_U, 0x000120, true,  0,     0},
+    };
+    for (unsigned i = 0; i < sizeof v / sizeof v[0]; i++) {
+        if (v[i].traps) {
+            assert_illegal_in_mode(v[i].mode, v[i].mstatus, SRET_WORD, v[i].name);
+            continue;
+        }
+        CPU cpu; test_cpu_reset_in_mode(&cpu, v[i].mode);
+        cpu_write_csr(&cpu, CSR_MSTATUS, v[i].mstatus);
+        cpu_write_csr(&cpu, CSR_SEPC, 0x40);
+        run_trap_case(&cpu, SRET_WORD);
+        TEST_ASSERT_EQUAL_INT_MESSAGE(v[i].after, cpu.privilege_mode, v[i].name);
+        TEST_ASSERT_EQUAL_UINT32_MESSAGE(0x40, cpu.pc, v[i].name);
+        TEST_ASSERT_EQUAL_UINT32_MESSAGE(v[i].mstatus_after, cpu_read_csr(&cpu, CSR_MSTATUS), v[i].name);
+    }
+}
+
+void test_sret_returns_to_sepc_without_its_low_bits(void) {
+    CPU cpu; test_cpu_reset_in_mode(&cpu, PRV_S);
+    cpu_write_csr(&cpu, CSR_MSTATUS, 0x120);
+    cpu_write_csr(&cpu, CSR_SEPC, 0x43);
+    run_trap_case(&cpu, SRET_WORD);
+    TEST_ASSERT_EQUAL_UINT32(0x40, cpu.pc);
+}
+
+void test_sret_leaves_the_m_registers_alone(void) {
+    CPU cpu; test_cpu_reset_in_mode(&cpu, PRV_S);
+    cpu_write_csr(&cpu, CSR_MSTATUS, 0x1920);       // SPP, SPIE, MPP = M, MPIE... only S bits may change
+    cpu_write_csr(&cpu, CSR_MEPC, 0x1110);
+    cpu_write_csr(&cpu, CSR_MCAUSE, 0x77);
+    cpu_write_csr(&cpu, CSR_MTVAL, 0x66);
+    cpu_write_csr(&cpu, CSR_SEPC, 0x40);
+    run_trap_case(&cpu, SRET_WORD);
+    TEST_ASSERT_EQUAL_UINT32(0x1110, cpu_read_csr(&cpu, CSR_MEPC));
+    TEST_ASSERT_EQUAL_UINT32(0x77, cpu_read_csr(&cpu, CSR_MCAUSE));
+    TEST_ASSERT_EQUAL_UINT32(0x66, cpu_read_csr(&cpu, CSR_MTVAL));
+    TEST_ASSERT_EQUAL_UINT32(0x1800, cpu_read_csr(&cpu, CSR_MSTATUS) & MSTATUS_MPP);   // MPP untouched
+}
+
+void test_sret_retires(void) {
+    CPU cpu; test_cpu_reset_in_mode(&cpu, PRV_S);
+    cpu_write_csr(&cpu, CSR_MSTATUS, 0x120);
+    cpu_write_csr(&cpu, CSR_SEPC, 0x20);
+    Memory mem;
+    mem_init(&mem, 64);
+    mem_write32(&mem, 0, SRET_WORD);
+    cpu_step(&cpu, &mem);
+    TEST_ASSERT_EQUAL_UINT64(1, cpu.minstret);
+    mem_free(&mem);
+}
+
+/* WFI is a NOP where it is legal: pc + 4 and nothing else changes. */
+void test_wfi_by_mode_and_tw(void) {
+    const struct { PrivMode mode; uint32_t mstatus; bool traps; } v[] = {
+        {PRV_M, 0,                false},
+        {PRV_M, MSTATUS_TW,       false},
+        {PRV_S, 0,                false},
+        {PRV_S, MSTATUS_TW,       true},
+        {PRV_U, 0,                true},
+        {PRV_U, MSTATUS_TW,       true},
+    };
+    for (unsigned i = 0; i < sizeof v / sizeof v[0]; i++) {
+        if (v[i].traps) {
+            assert_illegal_in_mode(v[i].mode, v[i].mstatus, WFI_WORD, "wfi");
+            continue;
+        }
+        CPU cpu; test_cpu_reset_in_mode(&cpu, v[i].mode);
+        cpu_write_csr(&cpu, CSR_MSTATUS, v[i].mstatus);
+        run_trap_case(&cpu, WFI_WORD);
+        TEST_ASSERT_EQUAL_UINT32(0x44, cpu.pc);
+        TEST_ASSERT_EQUAL_INT(v[i].mode, cpu.privilege_mode);
+        TEST_ASSERT_EQUAL_UINT32(v[i].mstatus, cpu_read_csr(&cpu, CSR_MSTATUS));
+    }
+}
+
+/* satp is read-only 0, so SFENCE.VMA is illegal in S and U, and a NOP in M. */
+void test_sfence_vma_by_mode(void) {
+    const uint32_t words[] = {SFENCE_X0_X0, SFENCE_X1_X2};
+    for (unsigned i = 0; i < 2; i++) {
+        assert_illegal_in_mode(PRV_U, 0, words[i], "sfence.vma");
+        assert_illegal_in_mode(PRV_S, 0, words[i], "sfence.vma");
+        CPU cpu; cpu_reset(&cpu);
+        cpu_write_reg(&cpu, 1, 0xABC);
+        cpu_write_reg(&cpu, 2, 0x5);
+        run_trap_case(&cpu, words[i]);
+        TEST_ASSERT_EQUAL_UINT32(0x44, cpu.pc);
+        TEST_ASSERT_EQUAL_INT(PRV_M, cpu.privilege_mode);
+    }
+}
+
+/* Encodings with no instruction behind them, including DRET (debug mode only). */
+void test_unknown_system_encodings_are_illegal(void) {
+    const struct { const char *name; uint32_t raw; } v[] = {
+        {"dret", DRET_WORD},
+        {"uret (removed)", 0x00200073},
+        {"imm 0xFFF", 0xFFF00073},
+        {"imm 0x106", 0x10600073},
+    };
+    const PrivMode modes[] = {PRV_U, PRV_S, PRV_M};
+    for (unsigned i = 0; i < sizeof v / sizeof v[0]; i++) {
+        for (unsigned m = 0; m < 3; m++) {
+            assert_illegal_in_mode(modes[m], 0, v[i].raw, v[i].name);
+        }
+    }
+}
+
+/* ECALL, EBREAK, MRET, SRET and WFI fix rd and rs1 to 0; SFENCE.VMA fixes rd. */
+void test_reserved_rd_and_rs1_fields_are_illegal(void) {
+    const struct { const char *name; uint32_t raw; } v[] = {
+        {"ecall rd=1",  0x000000F3}, {"ecall rs1=1",  0x00008073},
+        {"ebreak rd=1", 0x001000F3}, {"ebreak rs1=1", 0x00108073},
+        {"mret rd=1",   0x302000F3}, {"mret rs1=1",   0x30208073},
+        {"sret rd=1",   0x102000F3}, {"sret rs1=1",   0x10208073},
+        {"wfi rd=1",    0x105000F3}, {"wfi rs1=1",    0x10508073},
+        {"sfence.vma rd=1", 0x120000F3},
+    };
+    const PrivMode modes[] = {PRV_U, PRV_S, PRV_M};
+    for (unsigned i = 0; i < sizeof v / sizeof v[0]; i++) {
+        for (unsigned m = 0; m < 3; m++) {
+            assert_illegal_in_mode(modes[m], 0, v[i].raw, v[i].name);
+        }
+    }
+}
+
+void test_standard_system_words_still_work(void) {
+    CPU cpu; cpu_reset(&cpu);                       // M-mode
+    cpu_write_csr(&cpu, CSR_MTVEC, 0x1000);
+    run_trap_case(&cpu, 0x00000073);                // ECALL
+    TEST_ASSERT_EQUAL_UINT32(11, cpu_read_csr(&cpu, CSR_MCAUSE));
+    cpu_reset(&cpu);
+    run_trap_case(&cpu, EBREAK_WORD);
+    TEST_ASSERT_EQUAL_UINT32(3, cpu_read_csr(&cpu, CSR_MCAUSE));
+    cpu_reset(&cpu);
+    cpu_write_csr(&cpu, CSR_MEPC, 0x80);
+    run_trap_case(&cpu, MRET_WORD);
+    TEST_ASSERT_EQUAL_UINT32(0x80, cpu.pc);
+}
+
 /* Read-only CSR addresses (csr[11:10] == 0b11), here 0xF14 (mhartid) */
 void test_csrrw_read_only_csr_traps(void) {
     assert_csr_access_illegal(0xF1409073, 0xF14, 7); // CSRRW x0, mhartid, x1
@@ -2780,6 +2959,15 @@ int main(void) {
     RUN_TEST(test_delegated_trap_stval_holds_the_instruction_or_address);
     RUN_TEST(test_delegated_trap_does_not_retire);
     RUN_TEST(test_delegation_csrs_through_instructions);
+    RUN_TEST(test_sret_table);
+    RUN_TEST(test_sret_returns_to_sepc_without_its_low_bits);
+    RUN_TEST(test_sret_leaves_the_m_registers_alone);
+    RUN_TEST(test_sret_retires);
+    RUN_TEST(test_wfi_by_mode_and_tw);
+    RUN_TEST(test_sfence_vma_by_mode);
+    RUN_TEST(test_unknown_system_encodings_are_illegal);
+    RUN_TEST(test_reserved_rd_and_rs1_fields_are_illegal);
+    RUN_TEST(test_standard_system_words_still_work);
     RUN_TEST(test_csrr_misa_reports_rv32ius);
     RUN_TEST(test_csrr_tdata1_reads_zero);
     RUN_TEST(test_tdata1_write_does_not_read_back);
