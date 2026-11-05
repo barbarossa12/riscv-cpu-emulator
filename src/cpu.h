@@ -49,8 +49,8 @@
 #define CSR_CYCLEH    0xC80
 #define CSR_INSTRETH  0xC82
 
-// MXL=1 (RV32) in bits 31:30, plus the I extension (bit 8), S-mode (bit 18) and U-mode (bit 20)
-#define MISA_VALUE    0x40140100u
+// MXL=1 (RV32) in bits 31:30, plus I (bit 8), M (bit 12), S-mode (bit 18) and U-mode (bit 20)
+#define MISA_VALUE    0x40141100u
 
 // Counter-enable CSRs. Only the CY and IR bits exist: TM is absent until `time` exists
 // (Milestone 6) and there are no hpmcounters, so every other bit is read-only 0.
