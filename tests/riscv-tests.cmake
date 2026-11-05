@@ -28,6 +28,7 @@ if(RISCV_TESTS)
         simple add addi and andi auipc beq bge bgeu blt bltu bne fence_i jal jalr
         lb lbu lh lhu lw ld_st lui ma_data or ori sb sh sw st_ld sll slli
         slt slti sltiu sltu sra srai srl srli sub xor xori)
+    set(RV32UM_TESTS div divu mul mulh mulhsu mulhu rem remu)
     set(RV32MI_TESTS
         breakpoint csr mcsr illegal ma_fetch ma_addr scall sbreak shamt
         lw-misaligned lh-misaligned sh-misaligned sw-misaligned
@@ -42,6 +43,9 @@ if(RISCV_TESTS)
     set(_names "")
     foreach(t ${RV32UI_TESTS})
         list(APPEND _names rv32ui-p-${t})
+    endforeach()
+    foreach(t ${RV32UM_TESTS})
+        list(APPEND _names rv32um-p-${t})
     endforeach()
     foreach(t ${RV32MI_TESTS})
         list(APPEND _names rv32mi-p-${t})
