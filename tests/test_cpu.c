@@ -73,17 +73,17 @@ void test_cpu_other_csrs_keep_low_bits(void) {
 	TEST_ASSERT_EQUAL_UINT32(0x1003, cpu_read_csr(&test_cpu, CSR_MSCRATCH));
 }
 
-void test_cpu_misa_reports_rv32ius(void) {
+void test_cpu_misa_reports_the_implemented_extensions(void) {
 	CPU test_cpu = {0};
-	TEST_ASSERT_EQUAL_UINT32(0x40140100, cpu_read_csr(&test_cpu, CSR_MISA)); // MXL=1, I, S, U
+	TEST_ASSERT_EQUAL_UINT32(0x40141100, cpu_read_csr(&test_cpu, CSR_MISA)); // MXL=1, I, M, S, U
 }
 
 void test_cpu_misa_writes_are_ignored(void) {
 	CPU test_cpu = {0};
 	cpu_write_csr(&test_cpu, CSR_MISA, 0xFFFFFFFF); // tries to enable C, F, ...
-	TEST_ASSERT_EQUAL_UINT32(0x40140100, cpu_read_csr(&test_cpu, CSR_MISA));
+	TEST_ASSERT_EQUAL_UINT32(0x40141100, cpu_read_csr(&test_cpu, CSR_MISA));
 	cpu_write_csr(&test_cpu, CSR_MISA, 0);
-	TEST_ASSERT_EQUAL_UINT32(0x40140100, cpu_read_csr(&test_cpu, CSR_MISA));
+	TEST_ASSERT_EQUAL_UINT32(0x40141100, cpu_read_csr(&test_cpu, CSR_MISA));
 }
 
 void test_cpu_counteren_reads_zero_after_reset(void) {
@@ -633,7 +633,7 @@ int main(void) {
 	RUN_TEST(test_cpu_csr_writes_are_independent);
 	RUN_TEST(test_cpu_mtvec_mode_bits_read_as_zero);
 	RUN_TEST(test_cpu_other_csrs_keep_low_bits);
-	RUN_TEST(test_cpu_misa_reports_rv32ius);
+	RUN_TEST(test_cpu_misa_reports_the_implemented_extensions);
 	RUN_TEST(test_cpu_misa_writes_are_ignored);
 	RUN_TEST(test_cpu_counteren_reads_zero_after_reset);
 	RUN_TEST(test_cpu_counteren_writable_bits);
