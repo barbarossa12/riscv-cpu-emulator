@@ -111,6 +111,10 @@ void cpu_write_csr(CPU *cpu, uint16_t addr, uint32_t value) {
 			cpu->csr[addr] = new_val;
 			return;
 		}
+		case CSR_MCOUNTEREN:
+		case CSR_SCOUNTEREN:
+			cpu->csr[addr] = value & COUNTEREN_WRITABLE; // WARL: other bits read-only 0
+			return;
 		case CSR_MEPC:
 			value &= ~0x3u; // IALIGN=32: the low two bits are always 0
 			break;
