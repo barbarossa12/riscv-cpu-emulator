@@ -4,6 +4,16 @@
 
 #define CSR_MSTATUS  0x300
 #define CSR_MISA      0x301
+#define CSR_SSTATUS  0x100
+#define CSR_SIE      0x104
+#define CSR_STVEC    0x105
+#define CSR_SSCRATCH 0x140
+#define CSR_SEPC     0x141
+#define CSR_SCAUSE   0x142
+#define CSR_STVAL    0x143
+#define CSR_SIP      0x144
+#define CSR_SATP     0x180
+#define CSR_MIDELEG  0x303   // the register itself arrives in step 4; sie/sip already depend on it
 #define CSR_MIE      0x304
 #define CSR_MTVEC    0x305
 #define CSR_MSCRATCH 0x340
@@ -41,6 +51,12 @@
 #define COUNTEREN_IR (1u << 2)
 #define COUNTEREN_WRITABLE (COUNTEREN_CY | COUNTEREN_IR)
 
+// Supervisor interrupt bits, the same positions in mip, mie, sip and sie
+#define INT_SSI   (1u << 1)
+#define INT_STI   (1u << 5)
+#define INT_SEI   (1u << 9)
+#define INT_S_ALL (INT_SSI | INT_STI | INT_SEI)   // 0x222
+
 #define MSTATUS_SIE  (1u << 1)
 #define MSTATUS_MIE  (1u << 3)
 #define MSTATUS_SPIE (1u << 5)
@@ -50,6 +66,9 @@
 #define MSTATUS_MPRV (1u << 17)
 #define MSTATUS_TW   (1u << 21)
 #define MSTATUS_TSR  (1u << 22)
+
+// The part of mstatus that sstatus shows
+#define SSTATUS_MASK (MSTATUS_SIE | MSTATUS_SPIE | MSTATUS_SPP)   // 0x122
 
 // Bits of mstatus that exist. Everything else (UBE, FS, VS, XS, SUM, MXR,
 // TVM, SD, ...) is read-only 0 for now.
