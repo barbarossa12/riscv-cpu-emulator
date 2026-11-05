@@ -1,3 +1,4 @@
+#include <stdio.h>
 #include "unity.h"
 #include "../src/cpu.h"
 #include "cpu_test_util.h"
@@ -425,6 +426,52 @@ void test_cpu_satp_is_read_only_zero(void) {
 	TEST_ASSERT_EQUAL_UINT32(0, cpu_read_csr(&c, CSR_SATP));
 }
 
+/* ---- Delegation registers ---------------------------------------------------------------- */
+
+void test_cpu_medeleg_writable_mask(void) {
+	CPU c; cpu_reset(&c);
+	cpu_write_csr(&c, CSR_MEDELEG, 0xFFFFFFFF);
+	TEST_ASSERT_EQUAL_UINT32(0x0000B3FF, cpu_read_csr(&c, CSR_MEDELEG));
+}
+
+void test_cpu_medeleg_each_bit(void) {
+	/* delegatable: 0-9 and the page faults 12, 13, 15. Not: 10 and 14 (reserved),
+	 * 11 (ECALL from M), 16 (double trap), and everything from 17 up. */
+	for (unsigned n = 0; n < 32; n++) {
+		CPU c; cpu_reset(&c);
+		cpu_write_csr(&c, CSR_MEDELEG, 1u << n);
+		bool delegatable = n <= 9 || n == 12 || n == 13 || n == 15;
+		uint32_t expected = delegatable ? (1u << n) : 0;
+		char msg[32];
+		snprintf(msg, sizeof msg, "medeleg bit %u", n);
+		TEST_ASSERT_EQUAL_UINT32_MESSAGE(expected, cpu_read_csr(&c, CSR_MEDELEG), msg);
+	}
+}
+
+void test_cpu_mideleg_writable_mask(void) {
+	CPU c; cpu_reset(&c);
+	cpu_write_csr(&c, CSR_MIDELEG, 0xFFFFFFFF);
+	TEST_ASSERT_EQUAL_UINT32(0x222, cpu_read_csr(&c, CSR_MIDELEG));
+	cpu_write_csr(&c, CSR_MIDELEG, 0x888);   // machine-level bits cannot be delegated
+	TEST_ASSERT_EQUAL_UINT32(0, cpu_read_csr(&c, CSR_MIDELEG));
+}
+
+void test_cpu_medelegh_and_mstatush_are_read_only_zero(void) {
+	const uint16_t csrs[] = {CSR_MEDELEGH, CSR_MSTATUSH};
+	for (unsigned i = 0; i < 2; i++) {
+		CPU c; cpu_reset(&c);
+		cpu_write_csr(&c, csrs[i], 0xFFFFFFFF);
+		TEST_ASSERT_EQUAL_UINT32(0, cpu_read_csr(&c, csrs[i]));
+	}
+}
+
+void test_cpu_mideleg_write_feeds_the_sie_view(void) {
+	CPU c; cpu_reset(&c);
+	cpu_write_csr(&c, CSR_MIE, 0x222);
+	cpu_write_csr(&c, CSR_MIDELEG, 0x22);          // SSI and STI delegated
+	TEST_ASSERT_EQUAL_UINT32(0x22, cpu_read_csr(&c, CSR_SIE));
+}
+
 int main(void) {
 	UNITY_BEGIN();
 	RUN_TEST(test_cpu_write_read_roundtrip_x5);
@@ -451,6 +498,11 @@ int main(void) {
 	RUN_TEST(test_cpu_plain_s_registers_round_trip);
 	RUN_TEST(test_cpu_s_registers_are_independent_of_the_m_registers);
 	RUN_TEST(test_cpu_satp_is_read_only_zero);
+	RUN_TEST(test_cpu_medeleg_writable_mask);
+	RUN_TEST(test_cpu_medeleg_each_bit);
+	RUN_TEST(test_cpu_mideleg_writable_mask);
+	RUN_TEST(test_cpu_medelegh_and_mstatush_are_read_only_zero);
+	RUN_TEST(test_cpu_mideleg_write_feeds_the_sie_view);
 	RUN_TEST(test_cpu_id_csrs_read_zero);
 	RUN_TEST(test_cpu_trigger_csrs_are_hardwired_zero);
 	RUN_TEST(test_cpu_mstatus_reads_zero_after_reset);
