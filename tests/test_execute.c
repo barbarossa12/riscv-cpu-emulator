@@ -2107,6 +2107,264 @@ void test_pmpaddr_all_ones_reads_back(void) {
     TEST_ASSERT_EQUAL_UINT32(0xFFFFFFFF, cpu_read_reg(&cpu, 2));
 }
 
+/* ---- PMP enforcement on fetch, load and store -------------------------------------------- */
+
+#define LB_X1_0_X2   0x00010083u
+#define LH_X1_0_X2   0x00011083u
+#define LBU_X1_0_X2  0x00014083u
+#define LHU_X1_0_X2  0x00015083u
+#define SB_X3_0_X2   0x00310023u
+#define SH_X3_0_X2   0x00311023u
+#define SW_X3_0_X2   0x00312023u
+#define ADDI_X6_7    0x00700313u
+#define PMP_DATA     0x1000u   /* the data region is NAPOT [0x1000, 0x2000) */
+
+/* A machine with an EMPTY PMP (cpu_reset, not the allow-all helper), 16 KiB of memory at 0, a marker
+ * word at 0x1000, mtvec = 0x3000, stvec = 0x2000 and a marker in mcause. */
+static void pmp_rig(CPU *cpu, Memory *mem, PrivMode mode) {
+    cpu_reset(cpu);
+    cpu->privilege_mode = mode;
+    cpu_write_csr(cpu, CSR_MTVEC, 0x3000);
+    cpu_write_csr(cpu, CSR_STVEC, 0x2000);
+    cpu_write_csr(cpu, CSR_MCAUSE, 0x77);
+    mem_init(mem, 0x4000);
+    mem_write32(mem, PMP_DATA, 0xAABBCCDD);
+}
+
+/* Entry `i` covers [0x1000, 0x2000) (pmpaddr 0x5FF, NAPOT) with the given config byte. */
+static void pmp_data_region(CPU *cpu, unsigned i, uint8_t cfg) {
+    cpu->pmpcfg[i] = cfg;
+    cpu->pmpaddr[i] = 0x5FF;
+}
+
+/* Execute one load or store at pc 0x40 with x2 = addr, x3 = a store value, x1 = a marker. */
+static void pmp_run_data(CPU *cpu, Memory *mem, uint32_t raw, uint32_t addr) {
+    cpu_write_reg(cpu, 1, 0x11111111);
+    cpu_write_reg(cpu, 2, addr);
+    cpu_write_reg(cpu, 3, 0x55667788);
+    cpu->pc = 0x40;
+    DecodedInstruction instr = decode_instruction(raw);
+    execute(cpu, mem, &instr);
+}
+
+/* The access trapped in M with the given cause and tval, from mode `from`, and nothing else changed. */
+static void pmp_assert_fault(CPU *cpu, uint32_t cause, uint32_t tval, uint32_t epc, PrivMode from, const char *what) {
+    TEST_ASSERT_EQUAL_INT_MESSAGE(PRV_M, cpu->privilege_mode, what);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0x3000, cpu->pc, what);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(cause, cpu_read_csr(cpu, CSR_MCAUSE), what);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(tval, cpu_read_csr(cpu, CSR_MTVAL), what);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(epc, cpu_read_csr(cpu, CSR_MEPC), what);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE((uint32_t)from << 11, cpu_read_csr(cpu, CSR_MSTATUS) & MSTATUS_MPP, what);
+}
+
+static void pmp_assert_no_trap(CPU *cpu, const char *what) {
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0x44, cpu->pc, what);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0x77, cpu_read_csr(cpu, CSR_MCAUSE), what);
+}
+
+/* Loads and stores from U and from S against one region. fault = the cause, or 0 for allowed. */
+void test_pmp_enforced_on_loads_and_stores_from_s_and_u(void) {
+    const struct { const char *name; uint8_t cfg; uint32_t raw, addr; uint32_t fault; } v[] = {
+        {"R: LW ok",                 0x19, LW_X1_0_X2,  0x1000, 0},
+        {"R: SW denied",             0x19, SW_X3_0_X2,  0x1000, 7},
+        {"RW: SW ok",                0x1B, SW_X3_0_X2,  0x1000, 0},
+        {"none: LW denied",          0x18, LW_X1_0_X2,  0x1000, 5},
+        {"R: LW at the top",         0x19, LW_X1_0_X2,  0x1FFC, 0},
+        {"R: LW partial overlap",    0x19, LW_X1_0_X2,  0x1FFD, 5},
+        {"R: LW misaligned inside",  0x19, LW_X1_0_X2,  0x1001, 0},
+        {"R: LW outside, no match",  0x19, LW_X1_0_X2,  0x2000, 5},
+        {"RW: LB outside",           0x1B, LB_X1_0_X2,  0x2000, 5},
+        {"RW: LH outside",           0x1B, LH_X1_0_X2,  0x2000, 5},
+        {"RW: LBU outside",          0x1B, LBU_X1_0_X2, 0x2000, 5},
+        {"RW: LHU outside",          0x1B, LHU_X1_0_X2, 0x2000, 5},
+        {"RW: SB outside",           0x1B, SB_X3_0_X2,  0x2000, 7},
+        {"RW: SH outside",           0x1B, SH_X3_0_X2,  0x2000, 7},
+        {"RW: SW outside",           0x1B, SW_X3_0_X2,  0x2000, 7},
+    };
+    const PrivMode modes[] = {PRV_U, PRV_S};
+    for (unsigned m = 0; m < 2; m++) {
+        for (unsigned i = 0; i < sizeof v / sizeof v[0]; i++) {
+            CPU cpu; Memory mem;
+            pmp_rig(&cpu, &mem, modes[m]);
+            pmp_data_region(&cpu, 0, v[i].cfg);
+            pmp_run_data(&cpu, &mem, v[i].raw, v[i].addr);
+            if (v[i].fault == 0) {
+                pmp_assert_no_trap(&cpu, v[i].name);
+            } else {
+                pmp_assert_fault(&cpu, v[i].fault, v[i].addr, 0x40, modes[m], v[i].name);
+                TEST_ASSERT_EQUAL_UINT32_MESSAGE(0x11111111, cpu_read_reg(&cpu, 1), v[i].name);     /* rd untouched */
+                uint32_t word0 = 0, word_hi = 0xFFFFFFFF;
+                mem_try_read32(&mem, 0x1000, &word0);
+                mem_try_read32(&mem, 0x2000, &word_hi);
+                TEST_ASSERT_EQUAL_UINT32_MESSAGE(0xAABBCCDD, word0, v[i].name);                      /* memory untouched */
+                TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, word_hi, v[i].name);
+            }
+            mem_free(&mem);
+        }
+    }
+}
+
+void test_pmp_allowed_accesses_do_their_work(void) {
+    CPU cpu; Memory mem;
+    pmp_rig(&cpu, &mem, PRV_U);
+    pmp_data_region(&cpu, 0, 0x1B);                              /* RW */
+    pmp_run_data(&cpu, &mem, LW_X1_0_X2, 0x1000);
+    TEST_ASSERT_EQUAL_UINT32(0xAABBCCDD, cpu_read_reg(&cpu, 1));
+    pmp_run_data(&cpu, &mem, SW_X3_0_X2, 0x1004);
+    uint32_t stored = 0;
+    mem_try_read32(&mem, 0x1004, &stored);
+    TEST_ASSERT_EQUAL_UINT32(0x55667788, stored);
+    mem_free(&mem);
+}
+
+void test_pmp_no_entries_denies_u_and_s_but_the_helper_allows(void) {
+    CPU cpu; Memory mem;
+    pmp_rig(&cpu, &mem, PRV_U);                                  /* empty PMP */
+    pmp_run_data(&cpu, &mem, LW_X1_0_X2, 0x1000);
+    pmp_assert_fault(&cpu, 5, 0x1000, 0x40, PRV_U, "no entries: U denied");
+    mem_free(&mem);
+
+    pmp_rig(&cpu, &mem, PRV_S);
+    pmp_run_data(&cpu, &mem, SW_X3_0_X2, 0x1000);
+    pmp_assert_fault(&cpu, 7, 0x1000, 0x40, PRV_S, "no entries: S denied");
+    mem_free(&mem);
+
+    mem_init(&mem, 0x4000);                                      /* the allow-all helper */
+    test_cpu_reset_in_mode(&cpu, PRV_U);
+    cpu_write_csr(&cpu, CSR_MCAUSE, 0x77);
+    pmp_run_data(&cpu, &mem, LW_X1_0_X2, 0x1000);
+    pmp_assert_no_trap(&cpu, "helper: U allowed");
+    mem_free(&mem);
+}
+
+/* cpu_step in U with ADDI x6, x0, 7 at `pc`, an X-only or R-only region over [0x1000, 0x2000). */
+void test_pmp_enforced_on_fetch(void) {
+    const struct { const char *name; uint8_t cfg; uint32_t pc; bool ok; } v[] = {
+        {"X: fetch at the base",     0x1C, 0x1000, true },
+        {"X: fetch at the last word", 0x1C, 0x1FFC, true },
+        {"R only: no execute",       0x19, 0x1000, false},
+        {"X: outside, no match",     0x1C, 0x2000, false},
+    };
+    for (unsigned i = 0; i < sizeof v / sizeof v[0]; i++) {
+        CPU cpu; Memory mem;
+        pmp_rig(&cpu, &mem, PRV_U);
+        pmp_data_region(&cpu, 0, v[i].cfg);
+        mem_write32(&mem, v[i].pc, ADDI_X6_7);
+        cpu.pc = v[i].pc;
+        cpu_step(&cpu, &mem);
+        if (v[i].ok) {
+            TEST_ASSERT_EQUAL_UINT32_MESSAGE(7, cpu_read_reg(&cpu, 6), v[i].name);
+            TEST_ASSERT_EQUAL_UINT32_MESSAGE(v[i].pc + 4, cpu.pc, v[i].name);
+            TEST_ASSERT_EQUAL_UINT64_MESSAGE(1, cpu.minstret, v[i].name);
+        } else {
+            pmp_assert_fault(&cpu, 1, v[i].pc, v[i].pc, PRV_U, v[i].name);
+            TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, cpu_read_reg(&cpu, 6), v[i].name);
+            TEST_ASSERT_EQUAL_UINT64_MESSAGE(0, cpu.minstret, v[i].name);
+        }
+        mem_free(&mem);
+    }
+}
+
+/* M-mode ignores a region with L clear, and is held to it with L set. */
+void test_pmp_m_mode_and_the_l_bit(void) {
+    CPU cpu; Memory mem;
+    pmp_rig(&cpu, &mem, PRV_M);
+    pmp_data_region(&cpu, 0, 0x18);                              /* no permissions, L clear */
+    pmp_run_data(&cpu, &mem, LW_X1_0_X2, 0x1000);
+    pmp_assert_no_trap(&cpu, "M, L clear, no permissions: LW ok");
+    mem_free(&mem);
+
+    pmp_rig(&cpu, &mem, PRV_M);
+    pmp_data_region(&cpu, 0, 0x99);                              /* R only, L set */
+    pmp_run_data(&cpu, &mem, LW_X1_0_X2, 0x1000);
+    pmp_assert_no_trap(&cpu, "M, L set, R: LW ok");
+    mem_free(&mem);
+
+    pmp_rig(&cpu, &mem, PRV_M);
+    pmp_data_region(&cpu, 0, 0x99);
+    pmp_run_data(&cpu, &mem, SW_X3_0_X2, 0x1000);
+    pmp_assert_fault(&cpu, 7, 0x1000, 0x40, PRV_M, "M, L set, R: SW denied");
+    mem_free(&mem);
+
+    pmp_rig(&cpu, &mem, PRV_M);
+    pmp_data_region(&cpu, 0, 0x99);                              /* no execute */
+    mem_write32(&mem, 0x1000, ADDI_X6_7);
+    cpu.pc = 0x1000;
+    cpu_step(&cpu, &mem);
+    pmp_assert_fault(&cpu, 1, 0x1000, 0x1000, PRV_M, "M fetch, L set, no X");
+    mem_free(&mem);
+}
+
+/* M-mode, region R only. MPRV = 1 checks loads and stores as MPP; fetches ignore MPRV. */
+void test_pmp_mprv(void) {
+    const struct { const char *name; uint32_t mstatus; bool region; uint32_t raw; uint32_t fault; } v[] = {
+        {"MPRV, MPP=U: LW ok",         0x20000, true,  LW_X1_0_X2, 0},
+        {"MPRV, MPP=U: SW denied",     0x20000, true,  SW_X3_0_X2, 7},
+        {"MPRV, MPP=S: SW denied",     0x20800, true,  SW_X3_0_X2, 7},
+        {"MPRV, MPP=M: SW ok",         0x21800, true,  SW_X3_0_X2, 0},
+        {"MPRV clear: SW ok",          0x00000, true,  SW_X3_0_X2, 0},
+        {"MPRV, MPP=U, no entries: LW denied", 0x20000, false, LW_X1_0_X2, 5},
+        {"MPRV, MPP=M, no entries: LW ok",     0x21800, false, LW_X1_0_X2, 0},
+    };
+    for (unsigned i = 0; i < sizeof v / sizeof v[0]; i++) {
+        CPU cpu; Memory mem;
+        pmp_rig(&cpu, &mem, PRV_M);
+        if (v[i].region) {
+            pmp_data_region(&cpu, 0, 0x19);
+        }
+        cpu_write_csr(&cpu, CSR_MSTATUS, v[i].mstatus);
+        pmp_run_data(&cpu, &mem, v[i].raw, 0x1000);
+        if (v[i].fault == 0) {
+            pmp_assert_no_trap(&cpu, v[i].name);
+        } else {
+            pmp_assert_fault(&cpu, v[i].fault, 0x1000, 0x40, PRV_M, v[i].name);
+        }
+        mem_free(&mem);
+    }
+
+    CPU cpu; Memory mem;                                         /* a fetch is not affected by MPRV */
+    pmp_rig(&cpu, &mem, PRV_M);
+    cpu_write_csr(&cpu, CSR_MSTATUS, 0x20000);                   /* MPRV, MPP = U, and no entries */
+    mem_write32(&mem, 0x40, ADDI_X6_7);
+    cpu.pc = 0x40;
+    cpu_step(&cpu, &mem);
+    TEST_ASSERT_EQUAL_UINT32(7, cpu_read_reg(&cpu, 6));
+    mem_free(&mem);
+}
+
+/* A PMP fault can be delegated to S like any access fault. */
+void test_pmp_fault_delegated_to_s(void) {
+    CPU cpu; Memory mem;
+    pmp_rig(&cpu, &mem, PRV_U);
+    pmp_data_region(&cpu, 0, 0x18);                              /* no permissions */
+    cpu_write_csr(&cpu, CSR_MEDELEG, 0xA2);                      /* bits 1, 5 and 7: access faults */
+    pmp_run_data(&cpu, &mem, LW_X1_0_X2, 0x1000);
+    TEST_ASSERT_EQUAL_INT(PRV_S, cpu.privilege_mode);
+    TEST_ASSERT_EQUAL_UINT32(0x2000, cpu.pc);
+    TEST_ASSERT_EQUAL_UINT32(5, cpu_read_csr(&cpu, CSR_SCAUSE));
+    TEST_ASSERT_EQUAL_UINT32(0x1000, cpu_read_csr(&cpu, CSR_STVAL));
+    TEST_ASSERT_EQUAL_UINT32(0x40, cpu_read_csr(&cpu, CSR_SEPC));
+    TEST_ASSERT_EQUAL_UINT32(0x77, cpu_read_csr(&cpu, CSR_MCAUSE));   /* M registers untouched */
+    mem_free(&mem);
+}
+
+/* The entry the riscv-tests harness sets up lets U do everything. */
+void test_pmp_harness_entry_allows_u(void) {
+    CPU cpu; Memory mem;
+    pmp_rig(&cpu, &mem, PRV_U);
+    cpu.pmpcfg[0] = 0x1F;
+    cpu.pmpaddr[0] = 0x7FFFFFFF;
+    pmp_run_data(&cpu, &mem, LW_X1_0_X2, 0x1000);
+    pmp_assert_no_trap(&cpu, "harness entry: LW");
+    pmp_run_data(&cpu, &mem, SW_X3_0_X2, 0x1008);
+    pmp_assert_no_trap(&cpu, "harness entry: SW");
+    mem_write32(&mem, 0x40, ADDI_X6_7);
+    cpu.pc = 0x40;
+    cpu_step(&cpu, &mem);
+    TEST_ASSERT_EQUAL_UINT32(7, cpu_read_reg(&cpu, 6));
+    mem_free(&mem);
+}
+
 /* Read-only CSR addresses (csr[11:10] == 0b11), here 0xF14 (mhartid) */
 void test_csrrw_read_only_csr_traps(void) {
     assert_csr_access_illegal(0xF1409073, 0xF14, 7); // CSRRW x0, mhartid, x1
@@ -3111,6 +3369,14 @@ int main(void) {
     RUN_TEST(test_pmpcfg_read_modify_write_applies_the_warl_rule);
     RUN_TEST(test_pmp_locking_through_instructions);
     RUN_TEST(test_pmpaddr_all_ones_reads_back);
+    RUN_TEST(test_pmp_enforced_on_loads_and_stores_from_s_and_u);
+    RUN_TEST(test_pmp_allowed_accesses_do_their_work);
+    RUN_TEST(test_pmp_no_entries_denies_u_and_s_but_the_helper_allows);
+    RUN_TEST(test_pmp_enforced_on_fetch);
+    RUN_TEST(test_pmp_m_mode_and_the_l_bit);
+    RUN_TEST(test_pmp_mprv);
+    RUN_TEST(test_pmp_fault_delegated_to_s);
+    RUN_TEST(test_pmp_harness_entry_allows_u);
     RUN_TEST(test_csrr_misa_reports_rv32ius);
     RUN_TEST(test_csrr_tdata1_reads_zero);
     RUN_TEST(test_tdata1_write_does_not_read_back);
