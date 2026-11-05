@@ -38,6 +38,8 @@ if(RISCV_TESTS)
     # A skipped test is still registered, as disabled, so it shows up in the
     # CTest output instead of silently vanishing. Remove the entry when the
     # feature lands.
+    set(RISCV_SKIP_rv32mi-p-illegal
+        "mstatus.MPP accepts S from Milestone 4 step 1, so the test runs its S-mode sections, which need steps 2-5; re-enable after step 5")
     set(RISCV_SKIP_rv32mi-p-pmpaddr
         "we implement zero PMP entries (legal per the spec); the test assumes PMP is present")
 

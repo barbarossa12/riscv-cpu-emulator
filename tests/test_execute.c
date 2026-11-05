@@ -1,12 +1,13 @@
 #include "unity.h"
 #include "../src/execute.h"
+#include "cpu_test_util.h"
 
 void setUp(void) {} // Unity calles this before each test function
 void tearDown(void) {} // Unity calls this after eacht test function
 
 
 void test_addi(void) {
-    CPU cpu = {0};
+    CPU cpu; cpu_reset(&cpu);
     Memory mem;
     mem_init(&mem, 16);
     mem_write32(&mem, 0, 0x00500093);  // addi x1, x0, 5
@@ -22,7 +23,7 @@ void test_addi(void) {
 }
 
 void test_slti_true(void) {
-    CPU cpu = {0};
+    CPU cpu; cpu_reset(&cpu);
     Memory mem;
     mem_init(&mem, 16);
 
@@ -39,7 +40,7 @@ void test_slti_true(void) {
 }
 
 void test_slti_false(void) {
-    CPU cpu = {0};
+    CPU cpu; cpu_reset(&cpu);
     Memory mem;
     mem_init(&mem, 16);
 
@@ -56,7 +57,7 @@ void test_slti_false(void) {
 }
 
 void test_slti_signed_edge(void) {
-    CPU cpu = {0};
+    CPU cpu; cpu_reset(&cpu);
     Memory mem;
     mem_init(&mem, 16);
 
@@ -73,7 +74,7 @@ void test_slti_signed_edge(void) {
 }
 
 void test_sltiu_true(void) {
-    CPU cpu = {0};
+    CPU cpu; cpu_reset(&cpu);
     Memory mem;
     mem_init(&mem, 16);
 
@@ -90,7 +91,7 @@ void test_sltiu_true(void) {
 }
 
 void test_sltiu_false(void) {
-    CPU cpu = {0};
+    CPU cpu; cpu_reset(&cpu);
     Memory mem;
     mem_init(&mem, 16);
 
@@ -108,7 +109,7 @@ void test_sltiu_false(void) {
 }
 
 void test_sltiu_signed_edge(void) {
-    CPU cpu = {0};
+    CPU cpu; cpu_reset(&cpu);
     Memory mem;
     mem_init(&mem, 16);
 
@@ -127,7 +128,7 @@ void test_sltiu_signed_edge(void) {
 
 
 void test_xori(void) {
-    CPU cpu = {0};
+    CPU cpu; cpu_reset(&cpu);
     Memory mem;
     mem_init(&mem, 16);
 
@@ -144,7 +145,7 @@ void test_xori(void) {
 }
 
 void test_ori(void) {
-    CPU cpu = {0};
+    CPU cpu; cpu_reset(&cpu);
     Memory mem;
     mem_init(&mem, 16);
 
@@ -161,7 +162,7 @@ void test_ori(void) {
 }
 
 void test_andi(void) {
-    CPU cpu = {0};
+    CPU cpu; cpu_reset(&cpu);
     Memory mem;
     mem_init(&mem, 16);
 
@@ -178,7 +179,7 @@ void test_andi(void) {
 }
 
 void test_slli(void) {
-    CPU cpu = {0};
+    CPU cpu; cpu_reset(&cpu);
     Memory mem;
     mem_init(&mem, 16);
 
@@ -195,7 +196,7 @@ void test_slli(void) {
 }
 
 void test_srli(void) {
-    CPU cpu = {0};
+    CPU cpu; cpu_reset(&cpu);
     Memory mem;
     mem_init(&mem, 16);
 
@@ -212,7 +213,7 @@ void test_srli(void) {
 }
 
 void test_srai(void) {
-    CPU cpu = {0};
+    CPU cpu; cpu_reset(&cpu);
     Memory mem;
     mem_init(&mem, 16);
 
@@ -229,7 +230,7 @@ void test_srai(void) {
 }
 
 void test_add(void) {
-    CPU cpu = {0};
+    CPU cpu; cpu_reset(&cpu);
     Memory mem;
     mem_init(&mem, 16);
 
@@ -248,7 +249,7 @@ void test_add(void) {
 
 
 void test_sub(void) {
-    CPU cpu = {0};
+    CPU cpu; cpu_reset(&cpu);
     Memory mem;
     mem_init(&mem, 16);
 
@@ -267,7 +268,7 @@ void test_sub(void) {
 
 
 void test_sll(void) {
-    CPU cpu = {0};
+    CPU cpu; cpu_reset(&cpu);
     Memory mem;
     mem_init(&mem, 16);
 
@@ -285,7 +286,7 @@ void test_sll(void) {
 }
 
 void test_slt_true(void) {
-    CPU cpu = {0};
+    CPU cpu; cpu_reset(&cpu);
     Memory mem;
     mem_init(&mem, 16);
 
@@ -303,7 +304,7 @@ void test_slt_true(void) {
 }
 
 void test_slt_false(void) {
-    CPU cpu = {0};
+    CPU cpu; cpu_reset(&cpu);
     Memory mem;
     mem_init(&mem, 16);
 
@@ -321,7 +322,7 @@ void test_slt_false(void) {
 }
 
 void test_slt_signed_edge(void) {
-    CPU cpu = {0};
+    CPU cpu; cpu_reset(&cpu);
     Memory mem;
     mem_init(&mem, 16);
 
@@ -339,7 +340,7 @@ void test_slt_signed_edge(void) {
 }
 
 void test_sltu_true(void) {
-    CPU cpu = {0};
+    CPU cpu; cpu_reset(&cpu);
     Memory mem;
     mem_init(&mem, 16);
 
@@ -357,7 +358,7 @@ void test_sltu_true(void) {
 }
 
 void test_sltu_false(void) {
-    CPU cpu = {0};
+    CPU cpu; cpu_reset(&cpu);
     Memory mem;
     mem_init(&mem, 16);
 
@@ -375,7 +376,7 @@ void test_sltu_false(void) {
 }
 
 void test_sltu_signed_edge(void) {
-    CPU cpu = {0};
+    CPU cpu; cpu_reset(&cpu);
     Memory mem;
     mem_init(&mem, 16);
 
@@ -393,7 +394,7 @@ void test_sltu_signed_edge(void) {
 }
 
 void test_xor(void) {
-    CPU cpu = {0};
+    CPU cpu; cpu_reset(&cpu);
     Memory mem;
     mem_init(&mem, 16);
 
@@ -411,7 +412,7 @@ void test_xor(void) {
 }
 
 void test_srl(void) {
-    CPU cpu = {0};
+    CPU cpu; cpu_reset(&cpu);
     Memory mem;
     mem_init(&mem, 16);
 
@@ -429,7 +430,7 @@ void test_srl(void) {
 }
 
 void test_sra(void) {
-    CPU cpu = {0};
+    CPU cpu; cpu_reset(&cpu);
     Memory mem;
     mem_init(&mem, 16);
 
@@ -447,7 +448,7 @@ void test_sra(void) {
 }
 
 void test_or(void) {
-    CPU cpu = {0};
+    CPU cpu; cpu_reset(&cpu);
     Memory mem;
     mem_init(&mem, 16);
 
@@ -465,7 +466,7 @@ void test_or(void) {
 }
 
 void test_and(void) {
-    CPU cpu = {0};
+    CPU cpu; cpu_reset(&cpu);
     Memory mem;
     mem_init(&mem, 16);
 
@@ -483,7 +484,7 @@ void test_and(void) {
 }
 
 void test_lui(void) {
-    CPU cpu = {0};
+    CPU cpu; cpu_reset(&cpu);
     Memory mem;
     mem_init(&mem, 16);
 
@@ -499,7 +500,7 @@ void test_lui(void) {
 }
 
 void test_auipc(void) {
-    CPU cpu = {0};
+    CPU cpu; cpu_reset(&cpu);
     Memory mem;
     mem_init(&mem, 16);
 
@@ -515,7 +516,7 @@ void test_auipc(void) {
 }
 
 void test_lb(void) {
-    CPU cpu = {0};
+    CPU cpu; cpu_reset(&cpu);
     Memory mem;
     mem_init(&mem, 16);
 
@@ -533,7 +534,7 @@ void test_lb(void) {
 }
 
 void test_lbu(void) {
-    CPU cpu = {0};
+    CPU cpu; cpu_reset(&cpu);
     Memory mem;
     mem_init(&mem, 16);
 
@@ -551,7 +552,7 @@ void test_lbu(void) {
 }
 
 void test_lh(void) {
-    CPU cpu = {0};
+    CPU cpu; cpu_reset(&cpu);
     Memory mem;
     mem_init(&mem, 16);
 
@@ -569,7 +570,7 @@ void test_lh(void) {
 }
 
 void test_lhu(void) {
-    CPU cpu = {0};
+    CPU cpu; cpu_reset(&cpu);
     Memory mem;
     mem_init(&mem, 16);
 
@@ -587,7 +588,7 @@ void test_lhu(void) {
 }
 
 void test_lw(void) {
-    CPU cpu = {0};
+    CPU cpu; cpu_reset(&cpu);
     Memory mem;
     mem_init(&mem, 16);
 
@@ -605,7 +606,7 @@ void test_lw(void) {
 }
 
 void test_sb(void) {
-    CPU cpu = {0};
+    CPU cpu; cpu_reset(&cpu);
     Memory mem;
     mem_init(&mem, 16);
 
@@ -623,7 +624,7 @@ void test_sb(void) {
 }
 
 void test_sh(void) {
-    CPU cpu = {0};
+    CPU cpu; cpu_reset(&cpu);
     Memory mem;
     mem_init(&mem, 16);
 
@@ -641,7 +642,7 @@ void test_sh(void) {
 }
 
 void test_sw(void) {
-    CPU cpu = {0};
+    CPU cpu; cpu_reset(&cpu);
     Memory mem;
     mem_init(&mem, 16);
 
@@ -659,7 +660,7 @@ void test_sw(void) {
 }
 
 void test_beq_taken(void) {
-    CPU cpu = {0};
+    CPU cpu; cpu_reset(&cpu);
     Memory mem;
     mem_init(&mem, 16);
 
@@ -676,7 +677,7 @@ void test_beq_taken(void) {
 }
 
 void test_beq_not_taken(void) {
-    CPU cpu = {0};
+    CPU cpu; cpu_reset(&cpu);
     Memory mem;
     mem_init(&mem, 16);
 
@@ -693,7 +694,7 @@ void test_beq_not_taken(void) {
 }
 
 void test_bne_taken(void) {
-    CPU cpu = {0};
+    CPU cpu; cpu_reset(&cpu);
     Memory mem;
     mem_init(&mem, 16);
 
@@ -710,7 +711,7 @@ void test_bne_taken(void) {
 }
 
 void test_bne_not_taken(void) {
-    CPU cpu = {0};
+    CPU cpu; cpu_reset(&cpu);
     Memory mem;
     mem_init(&mem, 16);
 
@@ -727,7 +728,7 @@ void test_bne_not_taken(void) {
 }
 
 void test_blt_taken(void) {
-    CPU cpu = {0};
+    CPU cpu; cpu_reset(&cpu);
     Memory mem;
     mem_init(&mem, 16);
 
@@ -744,7 +745,7 @@ void test_blt_taken(void) {
 }
 
 void test_blt_not_taken(void) {
-    CPU cpu = {0};
+    CPU cpu; cpu_reset(&cpu);
     Memory mem;
     mem_init(&mem, 16);
 
@@ -761,7 +762,7 @@ void test_blt_not_taken(void) {
 }
 
 void test_bge_taken(void) {
-    CPU cpu = {0};
+    CPU cpu; cpu_reset(&cpu);
     Memory mem;
     mem_init(&mem, 16);
 
@@ -778,7 +779,7 @@ void test_bge_taken(void) {
 }
 
 void test_bge_not_taken(void) {
-    CPU cpu = {0};
+    CPU cpu; cpu_reset(&cpu);
     Memory mem;
     mem_init(&mem, 16);
 
@@ -795,7 +796,7 @@ void test_bge_not_taken(void) {
 }
 
 void test_bltu_taken(void) {
-    CPU cpu = {0};
+    CPU cpu; cpu_reset(&cpu);
     Memory mem;
     mem_init(&mem, 16);
 
@@ -812,7 +813,7 @@ void test_bltu_taken(void) {
 }
 
 void test_bltu_not_taken(void) {
-    CPU cpu = {0};
+    CPU cpu; cpu_reset(&cpu);
     Memory mem;
     mem_init(&mem, 16);
 
@@ -829,7 +830,7 @@ void test_bltu_not_taken(void) {
 }
 
 void test_bgeu_taken(void) {
-    CPU cpu = {0};
+    CPU cpu; cpu_reset(&cpu);
     Memory mem;
     mem_init(&mem, 16);
 
@@ -846,7 +847,7 @@ void test_bgeu_taken(void) {
 }
 
 void test_bgeu_not_taken(void) {
-    CPU cpu = {0};
+    CPU cpu; cpu_reset(&cpu);
     Memory mem;
     mem_init(&mem, 16);
 
@@ -863,7 +864,7 @@ void test_bgeu_not_taken(void) {
 }
 
 void test_jal(void) {
-    CPU cpu = {0};
+    CPU cpu; cpu_reset(&cpu);
     Memory mem;
     mem_init(&mem, 32);
 
@@ -879,7 +880,7 @@ void test_jal(void) {
 }
 
 void test_jalr(void) {
-    CPU cpu = {0};
+    CPU cpu; cpu_reset(&cpu);
     Memory mem;
     mem_init(&mem, 32);
 
@@ -896,7 +897,7 @@ void test_jalr(void) {
 }
 
 void test_fence(void) {
-    CPU cpu = {0};
+    CPU cpu; cpu_reset(&cpu);
     Memory mem;
     mem_init(&mem, 16);
 
@@ -911,7 +912,7 @@ void test_fence(void) {
 }
 
 void test_csrrw(void) {
-    CPU cpu = {0};
+    CPU cpu; cpu_reset(&cpu);
     Memory mem;
     mem_init(&mem, 16);
 
@@ -930,7 +931,7 @@ void test_csrrw(void) {
 }
 
 void test_csrrs(void) {
-    CPU cpu = {0};
+    CPU cpu; cpu_reset(&cpu);
     Memory mem;
     mem_init(&mem, 16);
 
@@ -949,7 +950,7 @@ void test_csrrs(void) {
 }
 
 void test_csrrc(void) {
-    CPU cpu = {0};
+    CPU cpu; cpu_reset(&cpu);
     Memory mem;
     mem_init(&mem, 16);
 
@@ -968,7 +969,7 @@ void test_csrrc(void) {
 }
 
 void test_csrrwi(void) {
-    CPU cpu = {0};
+    CPU cpu; cpu_reset(&cpu);
     Memory mem;
     mem_init(&mem, 16);
 
@@ -986,7 +987,7 @@ void test_csrrwi(void) {
 }
 
 void test_csrrsi(void) {
-    CPU cpu = {0};
+    CPU cpu; cpu_reset(&cpu);
     Memory mem;
     mem_init(&mem, 16);
 
@@ -1004,7 +1005,7 @@ void test_csrrsi(void) {
 }
 
 void test_csrrci(void) {
-    CPU cpu = {0};
+    CPU cpu; cpu_reset(&cpu);
     Memory mem;
     mem_init(&mem, 16);
 
@@ -1022,7 +1023,7 @@ void test_csrrci(void) {
 }
 
 void test_ecall_traps(void) {
-    CPU cpu = {0};
+    CPU cpu; cpu_reset(&cpu);
     Memory mem;
     mem_init(&mem, 16);
 
@@ -1040,7 +1041,7 @@ void test_ecall_traps(void) {
 }
 
 void test_ebreak_traps(void) {
-    CPU cpu = {0};
+    CPU cpu; cpu_reset(&cpu);
     Memory mem;
     mem_init(&mem, 16);
 
@@ -1058,7 +1059,7 @@ void test_ebreak_traps(void) {
 }
 
 void test_ecall_mstatus_update(void) {
-    CPU cpu = {0};
+    CPU cpu; cpu_reset(&cpu);
     Memory mem;
     mem_init(&mem, 16);
 
@@ -1075,7 +1076,7 @@ void test_ecall_mstatus_update(void) {
 }
 
 void test_illegal_instruction_unknown_opcode(void) {
-    CPU cpu = {0};
+    CPU cpu; cpu_reset(&cpu);
     Memory mem;
     mem_init(&mem, 16);
 
@@ -1094,7 +1095,7 @@ void test_illegal_instruction_unknown_opcode(void) {
 }
 
 void test_illegal_instruction_unknown_funct3(void) {
-    CPU cpu = {0};
+    CPU cpu; cpu_reset(&cpu);
     Memory mem;
     mem_init(&mem, 16);
 
@@ -1113,7 +1114,7 @@ void test_illegal_instruction_unknown_funct3(void) {
 }
 
 void test_load_access_fault(void) {
-    CPU cpu = {0};
+    CPU cpu; cpu_reset(&cpu);
     Memory mem;
     mem_init(&mem, 16);
 
@@ -1132,7 +1133,7 @@ void test_load_access_fault(void) {
 }
 
 void test_store_access_fault(void) {
-    CPU cpu = {0};
+    CPU cpu; cpu_reset(&cpu);
     Memory mem;
     mem_init(&mem, 16);
 
@@ -1154,7 +1155,7 @@ void test_store_access_fault(void) {
 /* x1 = 0, so a negative offset gives an address near the top of the 32-bit space.
  * The address computation wraps (correct), but the access must still fault. */
 void test_load_access_fault_wrap(void) {
-    CPU cpu = {0};
+    CPU cpu; cpu_reset(&cpu);
     Memory mem;
     mem_init(&mem, 16);
 
@@ -1175,7 +1176,7 @@ void test_load_access_fault_wrap(void) {
 }
 
 void test_load_halfword_fault_wrap(void) {
-    CPU cpu = {0};
+    CPU cpu; cpu_reset(&cpu);
     Memory mem;
     mem_init(&mem, 16);
 
@@ -1196,7 +1197,7 @@ void test_load_halfword_fault_wrap(void) {
 }
 
 void test_store_access_fault_wrap(void) {
-    CPU cpu = {0};
+    CPU cpu; cpu_reset(&cpu);
     Memory mem;
     mem_init(&mem, 16);
 
@@ -1217,7 +1218,7 @@ void test_store_access_fault_wrap(void) {
 }
 
 void test_store_halfword_fault_wrap(void) {
-    CPU cpu = {0};
+    CPU cpu; cpu_reset(&cpu);
     Memory mem;
     mem_init(&mem, 16);
 
@@ -1240,7 +1241,7 @@ void test_store_halfword_fault_wrap(void) {
 /* Reserved funct7 values on OP / OP-IMM shifts must trap as illegal instructions
  * instead of silently executing as a neighbouring instruction. */
 static void assert_illegal_instruction(uint32_t encoding) {
-    CPU cpu = {0};
+    CPU cpu; cpu_reset(&cpu);
     Memory mem;
     mem_init(&mem, 16);
 
@@ -1285,7 +1286,7 @@ void test_illegal_srli_unknown_funct7(void) {
 /* IALIGN=32: a taken jump/branch to a target that isn't 4-byte aligned traps with
  * cause 0, mtval = the target, mepc = the jump itself, and rd is not written. */
 static void assert_misaligned_jump_trap(uint32_t encoding, uint32_t x1, uint32_t x2, uint32_t expected_target) {
-    CPU cpu = {0};
+    CPU cpu; cpu_reset(&cpu);
     Memory mem;
     mem_init(&mem, 16);
 
@@ -1321,7 +1322,7 @@ void test_jalr_misaligned_target_after_clearing_bit0(void) {
 }
 
 void test_jalr_ignores_target_bit0(void) {
-    CPU cpu = {0};
+    CPU cpu; cpu_reset(&cpu);
     Memory mem;
     mem_init(&mem, 16);
 
@@ -1364,7 +1365,7 @@ void test_bgeu_misaligned_target(void) {
 }
 
 void test_branch_not_taken_misaligned_target_no_trap(void) {
-    CPU cpu = {0};
+    CPU cpu; cpu_reset(&cpu);
     Memory mem;
     mem_init(&mem, 16);
 
@@ -1381,7 +1382,7 @@ void test_branch_not_taken_misaligned_target_no_trap(void) {
 }
 
 void test_csrrw_mtvec_clears_mode_bits(void) {
-    CPU cpu = {0};
+    CPU cpu; cpu_reset(&cpu);
     Memory mem;
     mem_init(&mem, 16);
 
@@ -1398,7 +1399,7 @@ void test_csrrw_mtvec_clears_mode_bits(void) {
 }
 
 void test_csrrwi_mtvec_clears_mode_bits(void) {
-    CPU cpu = {0};
+    CPU cpu; cpu_reset(&cpu);
     Memory mem;
     mem_init(&mem, 16);
 
@@ -1414,7 +1415,7 @@ void test_csrrwi_mtvec_clears_mode_bits(void) {
 }
 
 void test_trap_jumps_to_mtvec_base(void) {
-    CPU cpu = {0};
+    CPU cpu; cpu_reset(&cpu);
     Memory mem;
     mem_init(&mem, 16);
 
@@ -1437,7 +1438,7 @@ void test_trap_jumps_to_mtvec_base(void) {
 /* Illegal CSR access: traps with cause 2, mtval = the raw instruction, and neither
  * rd nor the CSR is touched. The CSR is primed with 0x1234, x1 = x1_val, x2 is a sentinel. */
 static void assert_csr_access_illegal(uint32_t encoding, uint16_t csr, uint32_t x1_val) {
-    CPU cpu = {0};
+    CPU cpu; cpu_reset(&cpu);
     Memory mem;
     mem_init(&mem, 16);
 
@@ -1463,7 +1464,7 @@ static void assert_csr_access_illegal(uint32_t encoding, uint16_t csr, uint32_t 
 /* Legal CSR read with no write: runs normally, rd gets the CSR value (expected_rd), CSR is
  * unchanged. The raw storage is primed with 0x1234, which hardwired CSRs ignore. */
 static void assert_csr_read_ok(uint32_t encoding, uint16_t csr, uint32_t expected_rd) {
-    CPU cpu = {0};
+    CPU cpu; cpu_reset(&cpu);
     Memory mem;
     mem_init(&mem, 16);
 
@@ -1541,7 +1542,7 @@ void test_csrrw_nonexistent_csr_below_read_only_range_traps(void) {
 /* rs1 = x0 / uimm = 0 must not write the CSR back at all. mtvec's raw storage is set to
  * 0x1003 directly (bypassing the WARL accessor), so a write-back would show up as 0x1000. */
 static void assert_csr_no_write_back(uint32_t encoding) {
-    CPU cpu = {0};
+    CPU cpu; cpu_reset(&cpu);
     Memory mem;
     mem_init(&mem, 16);
 
@@ -1617,7 +1618,7 @@ void test_csr_read_every_implemented_csr_does_not_trap(void) {
         CSR_CYCLE, CSR_INSTRET, CSR_CYCLEH, CSR_INSTRETH,
     };
     for (size_t i = 0; i < sizeof(implemented) / sizeof(implemented[0]); i++) {
-        CPU cpu = {0};
+        CPU cpu; cpu_reset(&cpu);
         Memory mem;
         mem_init(&mem, 16);
         cpu_write_csr(&cpu, CSR_MCAUSE, 0x77); // marker: no trap must overwrite it
@@ -1644,7 +1645,7 @@ void test_csrr_tdata1_reads_zero(void) {
 /* The probe in riscv-tests breakpoint.S: write tdata1, read it back, and take a mismatch to
  * mean the trigger type is unsupported. Hardwired-zero tdata1 must not echo the write. */
 void test_tdata1_write_does_not_read_back(void) {
-    CPU cpu = {0};
+    CPU cpu; cpu_reset(&cpu);
     Memory mem;
     mem_init(&mem, 16);
 
@@ -1665,7 +1666,7 @@ void test_tdata1_write_does_not_read_back(void) {
 /* cpu_step: fetch + decode + execute. A fetch outside memory is an instruction access fault
  * (cause 1, mtval = the faulting pc), not an abort. */
 static void assert_fetch_fault(Memory *mem, uint32_t start_pc) {
-    CPU cpu = {0};
+    CPU cpu; cpu_reset(&cpu);
     cpu_write_csr(&cpu, CSR_MTVEC, 0x1000);
     cpu_write_reg(&cpu, 1, 0xDEADBEEF);
     cpu.pc = start_pc;
@@ -1680,7 +1681,7 @@ static void assert_fetch_fault(Memory *mem, uint32_t start_pc) {
 }
 
 void test_cpu_step_executes_fetched_instruction(void) {
-    CPU cpu = {0};
+    CPU cpu; cpu_reset(&cpu);
     Memory mem;
     mem_init(&mem, 16);
     cpu_write_csr(&cpu, CSR_MCAUSE, 0x77); // marker: no trap must overwrite it
@@ -1695,7 +1696,7 @@ void test_cpu_step_executes_fetched_instruction(void) {
 }
 
 void test_cpu_step_two_steps_in_sequence(void) {
-    CPU cpu = {0};
+    CPU cpu; cpu_reset(&cpu);
     Memory mem;
     mem_init(&mem, 16);
     mem_write32(&mem, 0, 0x00500093); // ADDI x1, x0, 5
@@ -1710,7 +1711,7 @@ void test_cpu_step_two_steps_in_sequence(void) {
 }
 
 void test_cpu_step_fetches_last_whole_word(void) {
-    CPU cpu = {0};
+    CPU cpu; cpu_reset(&cpu);
     Memory mem;
     mem_init(&mem, 16);
     cpu_write_csr(&cpu, CSR_MCAUSE, 0x77);
@@ -1726,7 +1727,7 @@ void test_cpu_step_fetches_last_whole_word(void) {
 }
 
 void test_cpu_step_based_memory_fetch_works(void) {
-    CPU cpu = {0};
+    CPU cpu; cpu_reset(&cpu);
     Memory mem;
     mem_init_at(&mem, 0x80000000u, 16);
     mem_write32(&mem, 0x80000000u, 0x00500093); // ADDI x1, x0, 5
@@ -1755,8 +1756,8 @@ void test_cpu_step_fetch_at_size_faults(void) {
 
 void test_cpu_step_fetch_straddling_end_faults(void) {
     Memory mem;
-    mem_init(&mem, 16);
-    assert_fetch_fault(&mem, 14);
+    mem_init(&mem, 14);                // size not a multiple of 4: the word at 12 straddles the end
+    assert_fetch_fault(&mem, 12);      // pc must be 4-aligned, since mepc drops the low two bits
     mem_free(&mem);
 }
 
@@ -1782,7 +1783,7 @@ void test_cpu_step_fetch_at_top_of_address_space_faults(void) {
 }
 
 void test_cpu_step_fetch_fault_updates_trap_state(void) {
-    CPU cpu = {0};
+    CPU cpu; cpu_reset(&cpu);
     Memory mem;
     mem_init(&mem, 16);
     cpu_write_csr(&cpu, CSR_MTVEC, 0x1000);
@@ -1799,7 +1800,7 @@ void test_cpu_step_fetch_fault_updates_trap_state(void) {
 }
 
 void test_cpu_step_fetch_fault_changes_no_registers_or_memory(void) {
-    CPU cpu = {0};
+    CPU cpu; cpu_reset(&cpu);
     Memory mem;
     mem_init(&mem, 16);
     for (size_t i = 0; i < mem.size; i++) {
@@ -1825,7 +1826,7 @@ void test_cpu_step_fetch_fault_changes_no_registers_or_memory(void) {
 /* FENCE.I (Zifencei, funct3 = 1): a no-op that ignores funct12, rs1 and rd. Every register
  * holds a sentinel, so a wrongly written rd shows up. */
 static void assert_fence_i_is_noop(uint32_t encoding) {
-    CPU cpu = {0};
+    CPU cpu; cpu_reset(&cpu);
     Memory mem;
     mem_init(&mem, 16);
 
@@ -1878,7 +1879,7 @@ void test_misc_mem_funct3_7_is_illegal(void) {
 
 /* The pattern FENCE.I exists for: store a new instruction, FENCE.I, run it. */
 void test_fence_i_makes_stored_instruction_visible(void) {
-    CPU cpu = {0};
+    CPU cpu; cpu_reset(&cpu);
     Memory mem;
     mem_init(&mem, 32);
 
@@ -1897,11 +1898,11 @@ void test_fence_i_makes_stored_instruction_visible(void) {
     mem_free(&mem);
 }
 
-/* mstatus.MPP is WARL and holds only implemented modes; with M-mode alone it is always M. */
-void test_mstatus_mpp_probe_reads_back_m(void) {
+/* mstatus.MPP is WARL and holds only implemented modes; U, S and M are implemented. */
+void test_mstatus_mpp_probe_reads_back_s(void) {
     /* The sequence riscv-tests illegal.S uses to detect S-mode: clear MPP, set MPP = S,
-     * read it back. A hart without S-mode must not report S. */
-    CPU cpu = {0};
+     * read it back. S is implemented, so it reads back as S. */
+    CPU cpu; cpu_reset(&cpu);
     Memory mem;
     mem_init(&mem, 16);
     mem_write32(&mem, 0, 0x3000B073); // CSRRC x0, mstatus, x1
@@ -1914,12 +1915,12 @@ void test_mstatus_mpp_probe_reads_back_m(void) {
     cpu_step(&cpu, &mem);
     cpu_step(&cpu, &mem);
 
-    TEST_ASSERT_EQUAL_UINT32(MSTATUS_MPP, cpu_read_reg(&cpu, 2) & MSTATUS_MPP); // 11, not 01
+    TEST_ASSERT_EQUAL_UINT32(0x800, cpu_read_reg(&cpu, 2) & MSTATUS_MPP); // 01 (S)
     mem_free(&mem);
 }
 
-void test_mstatus_csrrw_cannot_clear_mpp(void) {
-    CPU cpu = {0};
+void test_mstatus_csrrw_can_set_mpp_u(void) {
+    CPU cpu; cpu_reset(&cpu);
     Memory mem;
     mem_init(&mem, 16);
     mem_write32(&mem, 0, 0x30009073); // CSRRW x0, mstatus, x1
@@ -1929,20 +1930,20 @@ void test_mstatus_csrrw_cannot_clear_mpp(void) {
     cpu_step(&cpu, &mem);
     cpu_step(&cpu, &mem);
 
-    TEST_ASSERT_EQUAL_UINT32(MSTATUS_MIE | MSTATUS_MPP, cpu_read_reg(&cpu, 2));
+    TEST_ASSERT_EQUAL_UINT32(MSTATUS_MIE, cpu_read_reg(&cpu, 2)); // MPP = U sticks
     mem_free(&mem);
 }
 
-void test_mret_leaves_mpp_as_m(void) {
-    CPU cpu = {0};
+void test_mret_sets_mpp_to_u(void) {
+    CPU cpu; cpu_reset(&cpu);
     Memory mem;
     mem_init(&mem, 16);
-    cpu_write_csr(&cpu, CSR_MSTATUS, 0); // MPP written as U
-    mem_write32(&mem, 0, 0x30200073);    // MRET
+    cpu_write_csr(&cpu, CSR_MSTATUS, MSTATUS_MPP); // MPP = M
+    mem_write32(&mem, 0, 0x30200073);              // MRET
 
     cpu_step(&cpu, &mem);
 
-    TEST_ASSERT_EQUAL_UINT32(MSTATUS_MPP, cpu_read_csr(&cpu, CSR_MSTATUS) & MSTATUS_MPP);
+    TEST_ASSERT_EQUAL_UINT32(0, cpu_read_csr(&cpu, CSR_MSTATUS) & MSTATUS_MPP); // least-privileged mode
     mem_free(&mem);
 }
 
@@ -1970,7 +1971,7 @@ static uint32_t read_via_csrr(CPU *cpu, uint32_t encoding) {
 }
 
 void test_counters_advance_one_per_instruction(void) {
-    CPU cpu = {0};
+    CPU cpu; cpu_reset(&cpu);
     Memory mem;
     mem_init(&mem, 64);
     load_nops(&mem, 3);
@@ -1985,7 +1986,7 @@ void test_counters_advance_one_per_instruction(void) {
 }
 
 void test_counter_read_returns_count_before_itself(void) {
-    CPU cpu = {0};
+    CPU cpu; cpu_reset(&cpu);
     Memory mem;
     mem_init(&mem, 64);
     load_nops(&mem, 3);
@@ -2001,7 +2002,7 @@ void test_counter_read_returns_count_before_itself(void) {
 }
 
 void test_counter_shadows_read_the_machine_counters(void) {
-    CPU cpu = {0};
+    CPU cpu; cpu_reset(&cpu);
     cpu.mcycle = 0x0000000100000005ull;
     cpu.minstret = 0x0000000200000009ull;
 
@@ -2012,7 +2013,7 @@ void test_counter_shadows_read_the_machine_counters(void) {
 }
 
 void test_csrrw_writes_a_machine_counter(void) {
-    CPU cpu = {0};
+    CPU cpu; cpu_reset(&cpu);
     Memory mem;
     mem_init(&mem, 16);
     mem_write32(&mem, 0, 0xB0009073); // CSRRW x0, mcycle, x1
@@ -2026,7 +2027,7 @@ void test_csrrw_writes_a_machine_counter(void) {
 }
 
 void test_illegal_instruction_does_not_retire(void) {
-    CPU cpu = {0};
+    CPU cpu; cpu_reset(&cpu);
     Memory mem;
     mem_init(&mem, 16);
     cpu_write_csr(&cpu, CSR_MTVEC, 0x1000);
@@ -2040,7 +2041,7 @@ void test_illegal_instruction_does_not_retire(void) {
 }
 
 void test_ecall_does_not_retire(void) {
-    CPU cpu = {0};
+    CPU cpu; cpu_reset(&cpu);
     Memory mem;
     mem_init(&mem, 16);
     cpu_write_csr(&cpu, CSR_MTVEC, 0x1000);
@@ -2054,7 +2055,7 @@ void test_ecall_does_not_retire(void) {
 }
 
 void test_ebreak_does_not_retire(void) {
-    CPU cpu = {0};
+    CPU cpu; cpu_reset(&cpu);
     Memory mem;
     mem_init(&mem, 16);
     cpu_write_csr(&cpu, CSR_MTVEC, 0x1000);
@@ -2068,7 +2069,7 @@ void test_ebreak_does_not_retire(void) {
 }
 
 void test_fetch_fault_does_not_retire(void) {
-    CPU cpu = {0};
+    CPU cpu; cpu_reset(&cpu);
     Memory mem;
     mem_init(&mem, 16);
     cpu_write_csr(&cpu, CSR_MTVEC, 0x1000);
@@ -2082,7 +2083,7 @@ void test_fetch_fault_does_not_retire(void) {
 }
 
 void test_trapping_csr_instruction_does_not_retire(void) {
-    CPU cpu = {0};
+    CPU cpu; cpu_reset(&cpu);
     Memory mem;
     mem_init(&mem, 16);
     cpu_write_csr(&cpu, CSR_MTVEC, 0x1000);
@@ -2095,7 +2096,7 @@ void test_trapping_csr_instruction_does_not_retire(void) {
 }
 
 void test_mret_retires(void) {
-    CPU cpu = {0};
+    CPU cpu; cpu_reset(&cpu);
     Memory mem;
     mem_init(&mem, 16);
     mem_write32(&mem, 0, 0x30200073); // MRET
@@ -2107,7 +2108,7 @@ void test_mret_retires(void) {
 }
 
 void test_minstret_write_suppresses_its_own_increment(void) {
-    CPU cpu = {0};
+    CPU cpu; cpu_reset(&cpu);
     Memory mem;
     mem_init(&mem, 16);
     cpu.minstret = 5;
@@ -2123,7 +2124,7 @@ void test_minstret_write_suppresses_its_own_increment(void) {
 }
 
 void test_mcycle_write_suppresses_its_own_increment(void) {
-    CPU cpu = {0};
+    CPU cpu; cpu_reset(&cpu);
     Memory mem;
     mem_init(&mem, 16);
     cpu.mcycle = 5;
@@ -2139,7 +2140,7 @@ void test_mcycle_write_suppresses_its_own_increment(void) {
 }
 
 void test_minstret_wraps_at_64_bits(void) {
-    CPU cpu = {0};
+    CPU cpu; cpu_reset(&cpu);
     Memory mem;
     mem_init(&mem, 16);
     cpu.minstret = 0xFFFFFFFFFFFFFFFFull;
@@ -2153,7 +2154,7 @@ void test_minstret_wraps_at_64_bits(void) {
 
 /* The carry out of the low half must reach the high half (a 32-bit counter would drop it). */
 void test_minstret_carries_into_the_high_half(void) {
-    CPU cpu = {0};
+    CPU cpu; cpu_reset(&cpu);
     Memory mem;
     mem_init(&mem, 16);
     cpu.minstret = 0x00000000FFFFFFFFull;
@@ -2168,7 +2169,7 @@ void test_minstret_carries_into_the_high_half(void) {
 }
 
 void test_mcycle_carries_into_the_high_half(void) {
-    CPU cpu = {0};
+    CPU cpu; cpu_reset(&cpu);
     Memory mem;
     mem_init(&mem, 16);
     cpu.mcycle = 0x00000000FFFFFFFFull;
@@ -2184,7 +2185,7 @@ void test_mcycle_carries_into_the_high_half(void) {
 /* The sequence in riscv-tests instret_overflow.S: write all ones to both halves, then one
  * retired instruction wraps the 64-bit counter to zero. */
 void test_instret_overflow_sequence(void) {
-    CPU cpu = {0};
+    CPU cpu; cpu_reset(&cpu);
     Memory mem;
     mem_init(&mem, 64);
     mem_write32(&mem, 0,  0xFFF00293);                 // ADDI x5, x0, -1
@@ -2214,7 +2215,7 @@ void test_counter_high_shadow_write_traps(void) {
 }
 
 void test_mret_returns_to_mepc(void) {
-    CPU cpu = {0};
+    CPU cpu; cpu_reset(&cpu);
     Memory mem;
     mem_init(&mem, 16);
 
@@ -2230,7 +2231,7 @@ void test_mret_returns_to_mepc(void) {
 }
 
 void test_mret_restores_mie_from_mpie(void) {
-    CPU cpu = {0};
+    CPU cpu; cpu_reset(&cpu);
     Memory mem;
     mem_init(&mem, 16);
 
@@ -2241,8 +2242,98 @@ void test_mret_restores_mie_from_mpie(void) {
     DecodedInstruction instr = decode_instruction(raw);
     execute(&cpu, &mem, &instr);
 
-    TEST_ASSERT_EQUAL_UINT32(MSTATUS_MIE | MSTATUS_MPIE | MSTATUS_MPP, cpu_read_csr(&cpu, CSR_MSTATUS));
+    TEST_ASSERT_EQUAL_UINT32(MSTATUS_MIE | MSTATUS_MPIE, cpu_read_csr(&cpu, CSR_MSTATUS));
     mem_free(&mem);
+}
+
+/* Run the single instruction `raw` at address 0 of a fresh machine with mtvec = 0x100. */
+static void run_one(CPU *cpu, uint32_t raw) {
+    Memory mem;
+    mem_init(&mem, 16);
+    mem_write32(&mem, 0, raw);
+    cpu_write_csr(cpu, CSR_MTVEC, 0x100);
+    DecodedInstruction instr = decode_instruction(raw);
+    execute(cpu, &mem, &instr);
+    mem_free(&mem);
+}
+
+/* ECALL: (mode it runs in) -> (mcause): U -> 8, S -> 9, M -> 11 */
+void test_ecall_cause_depends_on_mode(void) {
+    const struct { PrivMode mode; uint32_t cause; } v[] = {
+        {PRV_U, 8}, {PRV_S, 9}, {PRV_M, 11},
+    };
+    for (unsigned i = 0; i < sizeof v / sizeof v[0]; i++) {
+        CPU cpu; test_cpu_reset_in_mode(&cpu, v[i].mode);
+        run_one(&cpu, 0x00000073);
+        TEST_ASSERT_EQUAL_UINT32(v[i].cause, cpu_read_csr(&cpu, CSR_MCAUSE));
+    }
+}
+
+void test_trap_from_u_records_mpp_u_and_enters_m(void) {
+    CPU cpu; test_cpu_reset_in_mode(&cpu, PRV_U);
+    cpu_write_csr(&cpu, CSR_MSTATUS, MSTATUS_MIE);               // 0x8
+    run_one(&cpu, 0x00000073);                                   // ECALL
+    TEST_ASSERT_EQUAL_INT(PRV_M, cpu.privilege_mode);
+    TEST_ASSERT_EQUAL_UINT32(0x100, cpu.pc);
+    TEST_ASSERT_EQUAL_UINT32(0, cpu_read_csr(&cpu, CSR_MEPC));
+    TEST_ASSERT_EQUAL_UINT32(0x00000080, cpu_read_csr(&cpu, CSR_MSTATUS)); // MPIE, MIE = 0, MPP = U
+}
+
+void test_trap_from_s_records_mpp_s(void) {
+    CPU cpu; test_cpu_reset_in_mode(&cpu, PRV_S);
+    run_one(&cpu, 0x00000073);                                   // ECALL
+    TEST_ASSERT_EQUAL_INT(PRV_M, cpu.privilege_mode);
+    TEST_ASSERT_EQUAL_UINT32(0x00000800, cpu_read_csr(&cpu, CSR_MSTATUS)); // MPP = S
+}
+
+void test_trap_from_m_records_mpp_m(void) {
+    CPU cpu; cpu_reset(&cpu);
+    cpu_write_csr(&cpu, CSR_MSTATUS, MSTATUS_MIE);               // 0x8
+    run_one(&cpu, 0x00000073);                                   // ECALL
+    TEST_ASSERT_EQUAL_INT(PRV_M, cpu.privilege_mode);
+    TEST_ASSERT_EQUAL_UINT32(0x00001880, cpu_read_csr(&cpu, CSR_MSTATUS)); // MPIE | MPP = M
+}
+
+void test_mret_to_u_switches_mode_and_clears_mprv(void) {
+    CPU cpu; cpu_reset(&cpu);
+    cpu_write_csr(&cpu, CSR_MEPC, 0x40);
+    cpu_write_csr(&cpu, CSR_MSTATUS, 0x00020080);                // MPRV | MPIE, MPP = U
+    run_one(&cpu, 0x30200073);                                   // MRET
+    TEST_ASSERT_EQUAL_INT(PRV_U, cpu.privilege_mode);
+    TEST_ASSERT_EQUAL_UINT32(0x40, cpu.pc);
+    TEST_ASSERT_EQUAL_UINT32(0x00000088, cpu_read_csr(&cpu, CSR_MSTATUS)); // MIE, MPIE, MPP = U, MPRV = 0
+}
+
+void test_mret_to_s_switches_mode_and_clears_mprv(void) {
+    CPU cpu; cpu_reset(&cpu);
+    cpu_write_csr(&cpu, CSR_MEPC, 0x40);
+    cpu_write_csr(&cpu, CSR_MSTATUS, 0x00020880);                // MPRV | MPP = S | MPIE
+    run_one(&cpu, 0x30200073);                                   // MRET
+    TEST_ASSERT_EQUAL_INT(PRV_S, cpu.privilege_mode);
+    TEST_ASSERT_EQUAL_UINT32(0x00000088, cpu_read_csr(&cpu, CSR_MSTATUS));
+}
+
+void test_mret_to_m_keeps_mprv(void) {
+    CPU cpu; cpu_reset(&cpu);
+    cpu_write_csr(&cpu, CSR_MEPC, 0x40);
+    cpu_write_csr(&cpu, CSR_MSTATUS, 0x00021880);                // MPRV | MPP = M | MPIE
+    run_one(&cpu, 0x30200073);                                   // MRET
+    TEST_ASSERT_EQUAL_INT(PRV_M, cpu.privilege_mode);
+    TEST_ASSERT_EQUAL_UINT32(0x00020088, cpu_read_csr(&cpu, CSR_MSTATUS)); // MPRV kept, MPP = U
+}
+
+void test_mret_from_lower_mode_is_illegal(void) {
+    const PrivMode modes[] = {PRV_U, PRV_S};
+    for (unsigned i = 0; i < 2; i++) {
+        CPU cpu; test_cpu_reset_in_mode(&cpu, modes[i]);
+        run_one(&cpu, 0x30200073);                               // MRET
+        TEST_ASSERT_EQUAL_INT(PRV_M, cpu.privilege_mode);
+        TEST_ASSERT_EQUAL_UINT32(0x100, cpu.pc);
+        TEST_ASSERT_EQUAL_UINT32(2, cpu_read_csr(&cpu, CSR_MCAUSE));
+        TEST_ASSERT_EQUAL_UINT32(0x30200073, cpu_read_csr(&cpu, CSR_MTVAL));
+        TEST_ASSERT_EQUAL_UINT32(0, cpu_read_csr(&cpu, CSR_MEPC));
+        TEST_ASSERT_EQUAL_UINT32((uint32_t)modes[i] << 11, cpu_read_csr(&cpu, CSR_MSTATUS) & MSTATUS_MPP);
+    }
 }
 
 int main(void) {
@@ -2384,9 +2475,9 @@ int main(void) {
     RUN_TEST(test_misc_mem_funct3_2_is_illegal);
     RUN_TEST(test_misc_mem_funct3_7_is_illegal);
     RUN_TEST(test_fence_i_makes_stored_instruction_visible);
-    RUN_TEST(test_mstatus_mpp_probe_reads_back_m);
-    RUN_TEST(test_mstatus_csrrw_cannot_clear_mpp);
-    RUN_TEST(test_mret_leaves_mpp_as_m);
+    RUN_TEST(test_mstatus_mpp_probe_reads_back_s);
+    RUN_TEST(test_mstatus_csrrw_can_set_mpp_u);
+    RUN_TEST(test_mret_sets_mpp_to_u);
     RUN_TEST(test_counters_advance_one_per_instruction);
     RUN_TEST(test_counter_read_returns_count_before_itself);
     RUN_TEST(test_counter_shadows_read_the_machine_counters);
@@ -2407,5 +2498,13 @@ int main(void) {
     RUN_TEST(test_counter_high_shadow_write_traps);
     RUN_TEST(test_mret_returns_to_mepc);
     RUN_TEST(test_mret_restores_mie_from_mpie);
+    RUN_TEST(test_ecall_cause_depends_on_mode);
+    RUN_TEST(test_trap_from_u_records_mpp_u_and_enters_m);
+    RUN_TEST(test_trap_from_s_records_mpp_s);
+    RUN_TEST(test_trap_from_m_records_mpp_m);
+    RUN_TEST(test_mret_to_u_switches_mode_and_clears_mprv);
+    RUN_TEST(test_mret_to_s_switches_mode_and_clears_mprv);
+    RUN_TEST(test_mret_to_m_keeps_mprv);
+    RUN_TEST(test_mret_from_lower_mode_is_illegal);
 	return UNITY_END();
 }

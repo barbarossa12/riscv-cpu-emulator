@@ -33,9 +33,20 @@
 // MXL=1 (RV32) in bits 31:30, and the I extension at bit 8
 #define MISA_VALUE    0x40000100u
 
+#define MSTATUS_SIE  (1u << 1)
 #define MSTATUS_MIE  (1u << 3)
+#define MSTATUS_SPIE (1u << 5)
 #define MSTATUS_MPIE (1u << 7)
+#define MSTATUS_SPP  (1u << 8)
 #define MSTATUS_MPP  (3u << 11)
+#define MSTATUS_MPRV (1u << 17)
+#define MSTATUS_TW   (1u << 21)
+#define MSTATUS_TSR  (1u << 22)
+
+// Bits of mstatus that exist. Everything else (UBE, FS, VS, XS, SUM, MXR,
+// TVM, SD, ...) is read-only 0 for now.
+#define MSTATUS_WRITABLE (MSTATUS_SIE | MSTATUS_MIE | MSTATUS_SPIE | MSTATUS_MPIE | \
+                          MSTATUS_SPP | MSTATUS_MPP | MSTATUS_MPRV | MSTATUS_TW | MSTATUS_TSR)
 
 // Privilege modes, encoded the same way as mstatus.MPP (the value 2 is reserved)
 typedef enum {

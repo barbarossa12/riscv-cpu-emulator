@@ -13,6 +13,7 @@ static uint32_t execute_jalr(CPU *cpu, Memory *mem, DecodedInstruction *instr, u
 static uint32_t execute_fence(CPU *cpu, Memory *mem, DecodedInstruction *instr, uint32_t pc);
 static uint32_t execute_system(CPU *cpu, Memory *mem, DecodedInstruction *instr, uint32_t pc);
 static uint32_t trap_enter(CPU *cpu, uint32_t pc, uint32_t cause, uint32_t tval);
+static uint32_t ecall_cause(PrivMode mode);
 static bool target_misaligned(uint32_t target);
 static bool csr_exists(uint16_t csr_addr);
 static bool csr_is_read_only(uint16_t csr_addr);
@@ -414,17 +415,24 @@ static uint32_t execute_system(CPU *cpu, Memory *mem, DecodedInstruction *instr,
     switch (instr->funct3) {
         case 0x0:
             if(instr->imm == 0) { // ECALL
-                return trap_enter(cpu, pc, 11, 0);
+                return trap_enter(cpu, pc, ecall_cause(cpu->privilege_mode), 0);
             } else if (instr->imm == 1) { // EBREAK
                 return trap_enter(cpu, pc, 3, 0);
             } else if (instr->imm == 0x302) { // MRET
+                if (cpu->privilege_mode != PRV_M) {
+                    return trap_enter(cpu, pc, 2, instr->raw); // MRET below M-mode is illegal
+                }
                 uint32_t mstatus = cpu_read_csr(cpu, CSR_MSTATUS);
+                PrivMode prev = (PrivMode)((mstatus & MSTATUS_MPP) >> 11);
                 uint32_t mpie = (mstatus & MSTATUS_MPIE) ? 1 : 0;
-                mstatus &= ~MSTATUS_MIE;
-                mstatus |= mpie ? MSTATUS_MIE : 0;  // MIE = old MPIE
-                mstatus |= MSTATUS_MPIE;            // MPIE = 1
-                // MPP stays M for now - no other privilege modes exist yet
+                mstatus &= ~(MSTATUS_MIE | MSTATUS_MPP); // MPP = U, the least-privileged mode
+                mstatus |= mpie ? MSTATUS_MIE : 0;       // MIE = old MPIE
+                mstatus |= MSTATUS_MPIE;                 // MPIE = 1
+                if (prev != PRV_M) {
+                    mstatus &= ~MSTATUS_MPRV;            // returning below M clears MPRV
+                }
                 cpu_write_csr(cpu, CSR_MSTATUS, mstatus);
+                cpu->privilege_mode = prev;
                 return cpu_read_csr(cpu, CSR_MEPC); // jump back to where the trap occurred
             }
             LOG_FATAL("unexpected imm for opcode 0x73 funct3 0x0: imm=0x%x", instr->imm);
@@ -546,14 +554,24 @@ static uint32_t take_branch(CPU *cpu, uint32_t pc, DecodedInstruction *instr) {
     return target;
 }
 
+// Environment-call exception code for the mode ECALL runs in
+static uint32_t ecall_cause(PrivMode mode) {
+    switch (mode) {
+        case PRV_U: return 8;
+        case PRV_S: return 9;
+        default:    return 11;
+    }
+}
+
 static uint32_t trap_enter(CPU *cpu, uint32_t pc, uint32_t cause, uint32_t tval) {
     cpu->trapped = true; // a trapping instruction does not retire (minstret)
     uint32_t mstatus = cpu_read_csr(cpu, CSR_MSTATUS);
     uint32_t mie = (mstatus & MSTATUS_MIE) ? 1 : 0;
     mstatus &= ~(MSTATUS_MPIE | MSTATUS_MIE | MSTATUS_MPP);
     mstatus |= mie ? MSTATUS_MPIE : 0;  // MPIE = old MIE
-    mstatus |= (3u << 11);              // MPP = M-mode (always, for now)
+    mstatus |= ((uint32_t)cpu->privilege_mode << 11); // MPP = the mode we trapped from
     cpu_write_csr(cpu, CSR_MSTATUS, mstatus);
+    cpu->privilege_mode = PRV_M;        // every trap goes to M until delegation lands
 
     cpu_write_csr(cpu, CSR_MEPC, pc);
     cpu_write_csr(cpu, CSR_MCAUSE, cause);

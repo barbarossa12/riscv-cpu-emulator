@@ -2,6 +2,11 @@
 #include <stdint.h>
 #include "log.h"
 #include "cpu.h"
+// The modes mstatus.MPP can hold: U, S and M. The encoding 2 is reserved.
+static bool mpp_is_legal(uint32_t mpp) {
+	return mpp == PRV_U || mpp == PRV_S || mpp == PRV_M;
+}
+
 void cpu_reset(CPU *cpu) {
 	*cpu = (CPU){0};
 	cpu->privilege_mode = PRV_M;
@@ -37,11 +42,6 @@ uint32_t cpu_read_csr(CPU *cpu, uint16_t addr){
 		LOG_FATAL("CPU CSR register value larger than 0xFFF: 0x%x", addr);
 	}
 	switch(addr) {
-		case CSR_MSTATUS:
-			// MPP is WARL and can hold only implemented modes. M-mode is the only one,
-			// so MPP is hardwired to M. Forced here so it holds from reset, whatever
-			// was written.
-			return cpu->csr[addr] | MSTATUS_MPP;
 		case CSR_MISA:
 			return MISA_VALUE;
 		case CSR_MCYCLE:
@@ -100,6 +100,20 @@ void cpu_write_csr(CPU *cpu, uint16_t addr, uint32_t value) {
 			cpu->minstret = (cpu->minstret & 0xFFFFFFFFull) | ((uint64_t)value << 32);
 			cpu->minstret_written = true;
 			return;
+		case CSR_MSTATUS: {
+			// MPP is WARL: a value that is not an implemented mode (the reserved 2)
+			// leaves MPP unchanged. The other fields of the write still apply.
+			uint32_t mpp = (value & MSTATUS_MPP) >> 11;
+			uint32_t new_val = value & MSTATUS_WRITABLE;
+			if (!mpp_is_legal(mpp)) {
+				new_val = (new_val & ~MSTATUS_MPP) | (cpu->csr[addr] & MSTATUS_MPP);
+			}
+			cpu->csr[addr] = new_val;
+			return;
+		}
+		case CSR_MEPC:
+			value &= ~0x3u; // IALIGN=32: the low two bits are always 0
+			break;
 		case CSR_MTVEC:
 			// MODE is WARL: only Direct (0) is supported, so MODE reads back as 0
 			value &= ~0x3u;

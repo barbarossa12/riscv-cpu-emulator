@@ -50,9 +50,9 @@ void test_cpu_csr_write_read_roundtrip(void) {
 
 void test_cpu_csr_writes_are_independent(void) {
 	CPU test_cpu = {0};
-	cpu_write_csr(&test_cpu, CSR_MEPC, 0xAAAA);
+	cpu_write_csr(&test_cpu, CSR_MEPC, 0xAAA8);   // 4-aligned: mepc drops the low two bits
 	cpu_write_csr(&test_cpu, CSR_MCAUSE, 0xBBBB);
-	TEST_ASSERT_EQUAL_UINT32(0xAAAA, cpu_read_csr(&test_cpu, CSR_MEPC));
+	TEST_ASSERT_EQUAL_UINT32(0xAAA8, cpu_read_csr(&test_cpu, CSR_MEPC));
 	TEST_ASSERT_EQUAL_UINT32(0xBBBB, cpu_read_csr(&test_cpu, CSR_MCAUSE));
 }
 
@@ -107,23 +107,65 @@ void test_cpu_trigger_csrs_are_hardwired_zero(void) {
 	TEST_ASSERT_EQUAL_UINT32(0, cpu_read_csr(&test_cpu, CSR_TDATA2));
 }
 
-void test_cpu_mstatus_mpp_is_m_from_reset(void) {
-	CPU test_cpu = {0};
-	TEST_ASSERT_EQUAL_UINT32(MSTATUS_MPP, cpu_read_csr(&test_cpu, CSR_MSTATUS));
+void test_cpu_mstatus_reads_zero_after_reset(void) {
+	CPU c; cpu_reset(&c);
+	TEST_ASSERT_EQUAL_UINT32(0, cpu_read_csr(&c, CSR_MSTATUS));
 }
 
-void test_cpu_mstatus_mpp_ignores_writes(void) {
-	CPU test_cpu = {0};
-	cpu_write_csr(&test_cpu, CSR_MSTATUS, 0);      // MPP = U
-	TEST_ASSERT_EQUAL_UINT32(MSTATUS_MPP, cpu_read_csr(&test_cpu, CSR_MSTATUS) & MSTATUS_MPP);
-	cpu_write_csr(&test_cpu, CSR_MSTATUS, 0x800);  // MPP = S
-	TEST_ASSERT_EQUAL_UINT32(MSTATUS_MPP, cpu_read_csr(&test_cpu, CSR_MSTATUS) & MSTATUS_MPP);
+void test_cpu_mstatus_writable_bits_round_trip(void) {
+	CPU c; cpu_reset(&c);
+	cpu_write_csr(&c, CSR_MSTATUS, 0x006219AA);   // every writable bit, MPP = M
+	TEST_ASSERT_EQUAL_UINT32(0x006219AA, cpu_read_csr(&c, CSR_MSTATUS));
 }
 
-void test_cpu_mstatus_other_bits_round_trip(void) {
-	CPU test_cpu = {0};
-	cpu_write_csr(&test_cpu, CSR_MSTATUS, MSTATUS_MIE | MSTATUS_MPIE);
-	TEST_ASSERT_EQUAL_UINT32(MSTATUS_MIE | MSTATUS_MPIE | MSTATUS_MPP, cpu_read_csr(&test_cpu, CSR_MSTATUS));
+void test_cpu_mstatus_unimplemented_bits_read_zero(void) {
+	CPU c; cpu_reset(&c);
+	cpu_write_csr(&c, CSR_MSTATUS, 0xFFFFFFFF);   // MPP = 3, so legal
+	// everything outside the writable set (UBE, VS, FS, XS, SUM, MXR, TVM, SD) is dropped
+	TEST_ASSERT_EQUAL_UINT32(0x006219AA, cpu_read_csr(&c, CSR_MSTATUS));
+}
+
+void test_cpu_mstatus_mpp_accepts_u_s_and_m(void) {
+	CPU c; cpu_reset(&c);
+	cpu_write_csr(&c, CSR_MSTATUS, 0x1800);       // M
+	TEST_ASSERT_EQUAL_UINT32(0x1800, cpu_read_csr(&c, CSR_MSTATUS));
+	cpu_write_csr(&c, CSR_MSTATUS, 0x0800);       // S
+	TEST_ASSERT_EQUAL_UINT32(0x0800, cpu_read_csr(&c, CSR_MSTATUS));
+	cpu_write_csr(&c, CSR_MSTATUS, 0x0000);       // U
+	TEST_ASSERT_EQUAL_UINT32(0x0000, cpu_read_csr(&c, CSR_MSTATUS));
+}
+
+void test_cpu_mstatus_mpp_reserved_write_keeps_old(void) {
+	CPU c; cpu_reset(&c);
+	cpu_write_csr(&c, CSR_MSTATUS, 0x1800);       // MPP = M
+	cpu_write_csr(&c, CSR_MSTATUS, 0x1000);       // write the reserved value 2
+	TEST_ASSERT_EQUAL_UINT32(0x1800, cpu_read_csr(&c, CSR_MSTATUS));
+	cpu_write_csr(&c, CSR_MSTATUS, 0x0000);       // MPP = U
+	cpu_write_csr(&c, CSR_MSTATUS, 0x1000);       // reserved again
+	TEST_ASSERT_EQUAL_UINT32(0x0000, cpu_read_csr(&c, CSR_MSTATUS));
+}
+
+void test_cpu_mstatus_mpp_reserved_write_still_applies_other_fields(void) {
+	CPU c; cpu_reset(&c);
+	cpu_write_csr(&c, CSR_MSTATUS, 0x1800);       // MPP = M
+	cpu_write_csr(&c, CSR_MSTATUS, 0x1008);       // MIE + reserved MPP
+	TEST_ASSERT_EQUAL_UINT32(0x1808, cpu_read_csr(&c, CSR_MSTATUS)); // MIE set, MPP still M
+}
+
+void test_cpu_mepc_low_bits_are_zero(void) {
+	CPU c; cpu_reset(&c);
+	const struct { uint32_t written, expected; } v[] = {
+		{0x80000000, 0x80000000},
+		{0x80000001, 0x80000000},
+		{0x80000002, 0x80000000},
+		{0x80000003, 0x80000000},
+		{0x80000004, 0x80000004},
+		{0xFFFFFFFF, 0xFFFFFFFC},
+	};
+	for (unsigned i = 0; i < sizeof v / sizeof v[0]; i++) {
+		cpu_write_csr(&c, CSR_MEPC, v[i].written);
+		TEST_ASSERT_EQUAL_UINT32(v[i].expected, cpu_read_csr(&c, CSR_MEPC));
+	}
 }
 
 void test_cpu_counter_halves_round_trip(void) {
@@ -233,9 +275,13 @@ int main(void) {
 	RUN_TEST(test_cpu_misa_writes_are_ignored);
 	RUN_TEST(test_cpu_id_csrs_read_zero);
 	RUN_TEST(test_cpu_trigger_csrs_are_hardwired_zero);
-	RUN_TEST(test_cpu_mstatus_mpp_is_m_from_reset);
-	RUN_TEST(test_cpu_mstatus_mpp_ignores_writes);
-	RUN_TEST(test_cpu_mstatus_other_bits_round_trip);
+	RUN_TEST(test_cpu_mstatus_reads_zero_after_reset);
+	RUN_TEST(test_cpu_mstatus_writable_bits_round_trip);
+	RUN_TEST(test_cpu_mstatus_unimplemented_bits_read_zero);
+	RUN_TEST(test_cpu_mstatus_mpp_accepts_u_s_and_m);
+	RUN_TEST(test_cpu_mstatus_mpp_reserved_write_keeps_old);
+	RUN_TEST(test_cpu_mstatus_mpp_reserved_write_still_applies_other_fields);
+	RUN_TEST(test_cpu_mepc_low_bits_are_zero);
 	RUN_TEST(test_cpu_counter_halves_round_trip);
 	RUN_TEST(test_cpu_counter_half_writes_keep_the_other_half);
 	RUN_TEST(test_cpu_counter_shadows_read_the_machine_counters);
