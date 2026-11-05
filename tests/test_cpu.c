@@ -1,5 +1,6 @@
 #include "unity.h"
 #include "../src/cpu.h"
+#include "cpu_test_util.h"
 
 void setUp(void) {} // Unity calles this before each test function
 void tearDown(void) {} // Unity calls this after eacht test function
@@ -181,6 +182,42 @@ void test_cpu_counter_write_marks_only_that_counter(void) {
 	TEST_ASSERT_TRUE(test_cpu.mcycle_written);
 }
 
+void test_cpu_reset_enters_machine_mode(void) {
+	CPU test_cpu = {0};
+	TEST_ASSERT_EQUAL_INT(PRV_U, test_cpu.privilege_mode); // a zeroed CPU is U-mode
+	cpu_reset(&test_cpu);
+	TEST_ASSERT_EQUAL_INT(PRV_M, test_cpu.privilege_mode);
+}
+
+void test_cpu_reset_clears_all_other_state(void) {
+	CPU test_cpu;
+	test_cpu.privilege_mode = PRV_S;
+	test_cpu.pc = 0x1234;
+	test_cpu.regs[7] = 0xDEADBEEF;
+	test_cpu.csr[CSR_MSCRATCH] = 0xCAFE;
+	test_cpu.mcycle = 99;
+	test_cpu.minstret = 98;
+	test_cpu.trapped = true;
+
+	cpu_reset(&test_cpu);
+
+	TEST_ASSERT_EQUAL_INT(PRV_M, test_cpu.privilege_mode);
+	TEST_ASSERT_EQUAL_UINT32(0, test_cpu.pc);
+	TEST_ASSERT_EQUAL_UINT32(0, test_cpu.regs[7]);
+	TEST_ASSERT_EQUAL_UINT32(0, test_cpu.csr[CSR_MSCRATCH]);
+	TEST_ASSERT_EQUAL_UINT64(0, test_cpu.mcycle);
+	TEST_ASSERT_EQUAL_UINT64(0, test_cpu.minstret);
+	TEST_ASSERT_FALSE(test_cpu.trapped);
+}
+
+void test_cpu_test_helper_sets_requested_mode(void) {
+	CPU test_cpu;
+	test_cpu_reset_in_mode(&test_cpu, PRV_S);
+	TEST_ASSERT_EQUAL_INT(PRV_S, test_cpu.privilege_mode);
+	test_cpu_reset_in_mode(&test_cpu, PRV_U);
+	TEST_ASSERT_EQUAL_INT(PRV_U, test_cpu.privilege_mode);
+}
+
 int main(void) {
 	UNITY_BEGIN();
 	RUN_TEST(test_cpu_write_read_roundtrip_x5);
@@ -204,6 +241,9 @@ int main(void) {
 	RUN_TEST(test_cpu_counter_shadows_read_the_machine_counters);
 	RUN_TEST(test_cpu_counter_shadows_ignore_writes);
 	RUN_TEST(test_cpu_counter_write_marks_only_that_counter);
+	RUN_TEST(test_cpu_reset_enters_machine_mode);
+	RUN_TEST(test_cpu_reset_clears_all_other_state);
+	RUN_TEST(test_cpu_test_helper_sets_requested_mode);
 	return UNITY_END();
 }
 
