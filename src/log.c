@@ -29,5 +29,7 @@ void log_message(LogLevel level, const char *file, int line, const char *fmt, ..
 	va_start(args, fmt);
 	vfprintf(stderr, fmt, args);
 	va_end(args);
+
+	fputc('\n', stderr); // one message per line
 }
 

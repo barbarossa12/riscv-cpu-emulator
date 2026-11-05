@@ -26,6 +26,10 @@ add_executable(test_execute test_execute.c)
 target_link_libraries(test_execute PRIVATE riscv_core unity)
 add_test(NAME test_execute COMMAND test_execute)
 
+add_executable(test_log test_log.c)
+target_link_libraries(test_log PRIVATE riscv_core unity)
+add_test(NAME test_log COMMAND test_log)
+
 add_executable(test_elf test_elf.c)
 target_link_libraries(test_elf PRIVATE riscv_core unity)
 add_test(NAME test_elf COMMAND test_elf)
