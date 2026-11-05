@@ -2,6 +2,7 @@
 #include <stdint.h>
 #include "log.h"
 #include "cpu.h"
+#include "pmp.h"
 // The modes mstatus.MPP can hold: U, S and M. The encoding 2 is reserved.
 static bool mpp_is_legal(uint32_t mpp) {
 	return mpp == PRV_U || mpp == PRV_S || mpp == PRV_M;
@@ -40,6 +41,9 @@ void cpu_write_reg(CPU *cpu, uint8_t index, uint32_t value) {
 uint32_t cpu_read_csr(CPU *cpu, uint16_t addr){
 	if(addr > 0xFFF) {
 		LOG_FATAL("CPU CSR register value larger than 0xFFF: 0x%x", addr);
+	}
+	if(pmp_csr_exists(addr)) {
+		return pmp_csr_read(cpu, addr);
 	}
 	switch(addr) {
 		case CSR_SSTATUS:
@@ -83,6 +87,10 @@ uint32_t cpu_read_csr(CPU *cpu, uint16_t addr){
 void cpu_write_csr(CPU *cpu, uint16_t addr, uint32_t value) {
 	if(addr > 0xFFF) {
 		LOG_FATAL("CPU CSR register value larger than 0xFFF: 0x%x", addr);
+	}
+	if(pmp_csr_exists(addr)) {
+		pmp_csr_write(cpu, addr, value);
+		return;
 	}
 	switch(addr) {
 		case CSR_MISA:    // WARL: no extension can be toggled, so writes are ignored
