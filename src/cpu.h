@@ -33,6 +33,14 @@
 // MXL=1 (RV32) in bits 31:30, and the I extension at bit 8
 #define MISA_VALUE    0x40000100u
 
+// Counter-enable CSRs. Only the CY and IR bits exist: TM is absent until `time` exists
+// (Milestone 6) and there are no hpmcounters, so every other bit is read-only 0.
+#define CSR_SCOUNTEREN 0x106
+#define CSR_MCOUNTEREN 0x306
+#define COUNTEREN_CY (1u << 0)
+#define COUNTEREN_IR (1u << 2)
+#define COUNTEREN_WRITABLE (COUNTEREN_CY | COUNTEREN_IR)
+
 #define MSTATUS_SIE  (1u << 1)
 #define MSTATUS_MIE  (1u << 3)
 #define MSTATUS_SPIE (1u << 5)
