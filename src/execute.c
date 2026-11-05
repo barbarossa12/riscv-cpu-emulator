@@ -1,5 +1,6 @@
 #include "execute.h"
 #include "log.h"
+#include "pmp.h"
 
 static uint32_t execute_op_imm(CPU *cpu, Memory *mem, DecodedInstruction *instr, uint32_t pc);
 static uint32_t execute_op(CPU *cpu, Memory *mem, DecodedInstruction *instr, uint32_t pc);
@@ -556,7 +557,7 @@ static bool csr_exists(uint16_t csr_addr) {
         case CSR_MEDELEG: case CSR_MIDELEG: case CSR_MEDELEGH: case CSR_MSTATUSH:
             return true;
         default:
-            return false;
+            return pmp_csr_exists(csr_addr);
     }
 }
 
