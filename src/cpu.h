@@ -1,5 +1,6 @@
 #pragma once
 #include <stdint.h>
+#include <stdbool.h>
 
 #define CSR_MSTATUS  0x300
 #define CSR_MISA      0x301
@@ -18,6 +19,17 @@
 #define CSR_MIMPID    0xF13
 #define CSR_MHARTID   0xF14
 
+// Machine counters (64-bit, split into low/high halves on RV32) and their
+// read-only user-level shadows
+#define CSR_MCYCLE    0xB00
+#define CSR_MINSTRET  0xB02
+#define CSR_MCYCLEH   0xB80
+#define CSR_MINSTRETH 0xB82
+#define CSR_CYCLE     0xC00
+#define CSR_INSTRET   0xC02
+#define CSR_CYCLEH    0xC80
+#define CSR_INSTRETH  0xC82
+
 // MXL=1 (RV32) in bits 31:30, and the I extension at bit 8
 #define MISA_VALUE    0x40000100u
 
@@ -30,6 +42,15 @@ typedef struct CPU {
 	uint32_t regs[32];
 	uint32_t pc;
 	uint32_t csr[4096]; // indexed directly by the 12-bit CSR address
+
+	uint64_t mcycle;    // behind mcycle/mcycleh and the cycle/cycleh shadows
+	uint64_t minstret;  // behind minstret/minstreth and the instret/instreth shadows
+
+	// Per-step bookkeeping for cpu_step: a counter write suppresses that
+	// counter's own increment, and an instruction that traps does not retire.
+	bool mcycle_written;
+	bool minstret_written;
+	bool trapped;
 } CPU;
 
 uint32_t cpu_read_reg(CPU *cpu, uint8_t index);
