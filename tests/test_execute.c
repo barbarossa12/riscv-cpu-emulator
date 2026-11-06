@@ -2483,6 +2483,227 @@ void test_m_reserved_funct7_still_traps(void) {
     assert_illegal_instruction(0x462091B3);                       /* funct7=0x23, funct3=1 */
 }
 
+/* ---- A extension: atomic memory operations ------------------------------------------------ */
+
+#define AMOADD_W    0x003120AFu   /* AMOADD.W x1, x3, (x2) */
+#define AMOSWAP_W   0x083120AFu
+#define AMOXOR_W    0x203120AFu
+#define AMOOR_W     0x403120AFu
+#define AMOAND_W    0x603120AFu
+#define AMOMIN_W    0x803120AFu
+#define AMOMAX_W    0xA03120AFu
+#define AMOMINU_W   0xC03120AFu
+#define AMOMAXU_W   0xE03120AFu
+
+/* An empty-PMP machine from pmp_rig (M-mode unless `mode` says otherwise), the word at 0x1000 set to
+ * `old`, x1 = a marker, x2 = addr, x3 = src, and one instruction executed at pc 0x40. */
+static void amo_run(CPU *cpu, Memory *mem, PrivMode mode, uint32_t raw, uint32_t addr, uint32_t src, uint32_t old) {
+    pmp_rig(cpu, mem, mode);
+    mem_write32(mem, PMP_DATA, old);
+    cpu_write_reg(cpu, 1, 0x11111111);
+    cpu_write_reg(cpu, 2, addr);
+    cpu_write_reg(cpu, 3, src);
+    cpu->pc = 0x40;
+    DecodedInstruction instr = decode_instruction(raw);
+    execute(cpu, mem, &instr);
+}
+
+static uint32_t amo_memory(Memory *mem) {
+    uint32_t word = 0;
+    mem_try_read32(mem, PMP_DATA, &word);
+    return word;
+}
+
+void test_amo_operations(void) {
+    const struct { const char *name; uint32_t raw, old, src, mem_after; } v[] = {
+        {"AMOADD",  AMOADD_W,  0x00000005, 0x00000003, 0x00000008},
+        {"AMOADD wraps", AMOADD_W, 0xFFFFFFFF, 0x00000001, 0x00000000},
+        {"AMOADD to the sign bit", AMOADD_W, 0x7FFFFFFF, 0x00000001, 0x80000000},
+        {"AMOSWAP", AMOSWAP_W, 0x11111111, 0x22222222, 0x22222222},
+        {"AMOXOR",  AMOXOR_W,  0xF0F0F0F0, 0xFFFF0000, 0x0F0FF0F0},
+        {"AMOOR",   AMOOR_W,   0xF0F0F0F0, 0x0F000F00, 0xFFF0FFF0},
+        {"AMOAND",  AMOAND_W,  0xF0F0F0F0, 0xFFFF0000, 0xF0F00000},
+        {"AMOMIN -1 vs 1",       AMOMIN_W,  0xFFFFFFFF, 0x00000001, 0xFFFFFFFF},
+        {"AMOMIN 0x80000000",    AMOMIN_W,  0x80000000, 0x7FFFFFFF, 0x80000000},
+        {"AMOMIN 5 vs 9",        AMOMIN_W,  0x00000005, 0x00000009, 0x00000005},
+        {"AMOMIN 9 vs 5",        AMOMIN_W,  0x00000009, 0x00000005, 0x00000005},
+        {"AMOMAX -1 vs 1",       AMOMAX_W,  0xFFFFFFFF, 0x00000001, 0x00000001},
+        {"AMOMAX 0x80000000",    AMOMAX_W,  0x80000000, 0x7FFFFFFF, 0x7FFFFFFF},
+        {"AMOMAX 5 vs 9",        AMOMAX_W,  0x00000005, 0x00000009, 0x00000009},
+        {"AMOMAX 9 vs 5",        AMOMAX_W,  0x00000009, 0x00000005, 0x00000009},
+        {"AMOMINU 0xFFFFFFFF",   AMOMINU_W, 0xFFFFFFFF, 0x00000001, 0x00000001},
+        {"AMOMINU 0x80000000",   AMOMINU_W, 0x80000000, 0x7FFFFFFF, 0x7FFFFFFF},
+        {"AMOMINU 5 vs 9",       AMOMINU_W, 0x00000005, 0x00000009, 0x00000005},
+        {"AMOMINU 9 vs 5",       AMOMINU_W, 0x00000009, 0x00000005, 0x00000005},
+        {"AMOMAXU 0xFFFFFFFF",   AMOMAXU_W, 0xFFFFFFFF, 0x00000001, 0xFFFFFFFF},
+        {"AMOMAXU 0x80000000",   AMOMAXU_W, 0x80000000, 0x7FFFFFFF, 0x80000000},
+        {"AMOMAXU 5 vs 9",       AMOMAXU_W, 0x00000005, 0x00000009, 0x00000009},
+        {"AMOMAXU 9 vs 5",       AMOMAXU_W, 0x00000009, 0x00000005, 0x00000009},
+    };
+    for (unsigned i = 0; i < sizeof v / sizeof v[0]; i++) {
+        CPU cpu; Memory mem;
+        amo_run(&cpu, &mem, PRV_M, v[i].raw, PMP_DATA, v[i].src, v[i].old);
+        pmp_assert_no_trap(&cpu, v[i].name);
+        TEST_ASSERT_EQUAL_HEX32_MESSAGE(v[i].old, cpu_read_reg(&cpu, 1), v[i].name);        /* rd = the old value */
+        TEST_ASSERT_EQUAL_HEX32_MESSAGE(v[i].mem_after, amo_memory(&mem), v[i].name);
+        TEST_ASSERT_EQUAL_HEX32_MESSAGE(PMP_DATA, cpu_read_reg(&cpu, 2), v[i].name);        /* sources untouched */
+        TEST_ASSERT_EQUAL_HEX32_MESSAGE(v[i].src, cpu_read_reg(&cpu, 3), v[i].name);
+        mem_free(&mem);
+    }
+}
+
+void test_amo_aq_and_rl_are_ignored(void) {
+    CPU cpu; Memory mem;
+    amo_run(&cpu, &mem, PRV_M, 0x063120AF, PMP_DATA, 3, 5);       /* AMOADD.W.aq.rl */
+    pmp_assert_no_trap(&cpu, "aq.rl");
+    TEST_ASSERT_EQUAL_HEX32(8, amo_memory(&mem));
+    TEST_ASSERT_EQUAL_HEX32(5, cpu_read_reg(&cpu, 1));
+    mem_free(&mem);
+}
+
+void test_amo_with_rd_x0_still_updates_memory(void) {
+    CPU cpu; Memory mem;
+    amo_run(&cpu, &mem, PRV_M, 0x0031202F, PMP_DATA, 3, 5);       /* AMOADD.W x0, x3, (x2) */
+    pmp_assert_no_trap(&cpu, "rd = x0");
+    TEST_ASSERT_EQUAL_HEX32(8, amo_memory(&mem));
+    TEST_ASSERT_EQUAL_HEX32(0, cpu_read_reg(&cpu, 0));
+    mem_free(&mem);
+}
+
+/* rd may be the same register as rs1 or rs2: both sources are read before rd is written. */
+void test_amo_rd_may_alias_a_source(void) {
+    CPU cpu; Memory mem;
+    amo_run(&cpu, &mem, PRV_M, 0x003121AF, PMP_DATA, 3, 5);       /* AMOADD.W x3, x3, (x2): rd == rs2 */
+    pmp_assert_no_trap(&cpu, "rd == rs2");
+    TEST_ASSERT_EQUAL_HEX32(5, cpu_read_reg(&cpu, 3));            /* the old value */
+    TEST_ASSERT_EQUAL_HEX32(8, amo_memory(&mem));                 /* old + the ORIGINAL x3 */
+    mem_free(&mem);
+
+    amo_run(&cpu, &mem, PRV_M, 0x0031212F, PMP_DATA, 3, 5);       /* AMOADD.W x2, x3, (x2): rd == rs1 */
+    pmp_assert_no_trap(&cpu, "rd == rs1");
+    TEST_ASSERT_EQUAL_HEX32(5, cpu_read_reg(&cpu, 2));
+    TEST_ASSERT_EQUAL_HEX32(8, amo_memory(&mem));                 /* the address was read before rd changed */
+    mem_free(&mem);
+}
+
+void test_amo_misaligned_address_raises_address_misaligned(void) {
+    for (uint32_t addr = 0x1001; addr <= 0x1003; addr++) {
+        CPU cpu; Memory mem;
+        amo_run(&cpu, &mem, PRV_M, AMOADD_W, addr, 3, 5);
+        pmp_assert_fault(&cpu, 6, addr, 0x40, PRV_M, "misaligned AMO");
+        TEST_ASSERT_EQUAL_HEX32(0x11111111, cpu_read_reg(&cpu, 1));    /* rd untouched */
+        TEST_ASSERT_EQUAL_HEX32(5, amo_memory(&mem));                  /* memory untouched */
+        mem_free(&mem);
+    }
+}
+
+void test_amo_outside_memory_is_a_store_access_fault(void) {
+    const uint32_t addrs[] = {0x4000, 0xFFFFFFFC};
+    for (unsigned i = 0; i < 2; i++) {
+        CPU cpu; Memory mem;
+        amo_run(&cpu, &mem, PRV_M, AMOADD_W, addrs[i], 3, 5);
+        pmp_assert_fault(&cpu, 7, addrs[i], 0x40, PRV_M, "AMO outside memory");
+        TEST_ASSERT_EQUAL_HEX32(0x11111111, cpu_read_reg(&cpu, 1));
+        mem_free(&mem);
+    }
+}
+
+/* AMOSWAP over a region [0x1000, 0x2000): old = 0x00AB, src = 0x55667788. */
+void test_amo_pmp(void) {
+    const struct { const char *name; PrivMode mode; uint8_t cfg; bool region; uint32_t mstatus; bool ok; } v[] = {
+        {"U, read-only region",          PRV_U, 0x19, true,  0,       false},
+        {"U, read-write region",         PRV_U, 0x1B, true,  0,       true },
+        {"U, no entries",                PRV_U, 0,    false, 0,       false},
+        {"S, read-write region",         PRV_S, 0x1B, true,  0,       true },
+        {"M, L clear, read-only region", PRV_M, 0x19, true,  0,       true },
+        {"M, L set, read-only region",   PRV_M, 0x99, true,  0,       false},
+        {"M, MPRV with MPP=U, read-only", PRV_M, 0x19, true, 0x20000, false},
+        {"M, MPRV with MPP=U, read-write", PRV_M, 0x1B, true, 0x20000, true },
+    };
+    for (unsigned i = 0; i < sizeof v / sizeof v[0]; i++) {
+        CPU cpu; Memory mem;
+        pmp_rig(&cpu, &mem, v[i].mode);
+        if (v[i].region) {
+            pmp_data_region(&cpu, 0, v[i].cfg);
+        }
+        cpu_write_csr(&cpu, CSR_MSTATUS, v[i].mstatus);
+        mem_write32(&mem, PMP_DATA, 0xAB);
+        cpu_write_reg(&cpu, 1, 0x11111111);
+        cpu_write_reg(&cpu, 2, PMP_DATA);
+        cpu_write_reg(&cpu, 3, 0x55667788);
+        cpu.pc = 0x40;
+        DecodedInstruction instr = decode_instruction(AMOSWAP_W);
+        execute(&cpu, &mem, &instr);
+        if (v[i].ok) {
+            pmp_assert_no_trap(&cpu, v[i].name);
+            TEST_ASSERT_EQUAL_HEX32_MESSAGE(0xAB, cpu_read_reg(&cpu, 1), v[i].name);
+            TEST_ASSERT_EQUAL_HEX32_MESSAGE(0x55667788, amo_memory(&mem), v[i].name);
+        } else {
+            pmp_assert_fault(&cpu, 7, PMP_DATA, 0x40, v[i].mode, v[i].name);
+            TEST_ASSERT_EQUAL_HEX32_MESSAGE(0x11111111, cpu_read_reg(&cpu, 1), v[i].name);
+            TEST_ASSERT_EQUAL_HEX32_MESSAGE(0xAB, amo_memory(&mem), v[i].name);        /* memory untouched */
+        }
+        mem_free(&mem);
+    }
+}
+
+void test_amo_pmp_fault_can_be_delegated_to_s(void) {
+    CPU cpu; Memory mem;
+    pmp_rig(&cpu, &mem, PRV_U);
+    pmp_data_region(&cpu, 0, 0x19);                               /* read-only */
+    cpu_write_csr(&cpu, CSR_MEDELEG, 0x80);                       /* bit 7: store/AMO access fault */
+    mem_write32(&mem, PMP_DATA, 0xAB);
+    cpu_write_reg(&cpu, 2, PMP_DATA);
+    cpu.pc = 0x40;
+    DecodedInstruction instr = decode_instruction(AMOSWAP_W);
+    execute(&cpu, &mem, &instr);
+    TEST_ASSERT_EQUAL_INT(PRV_S, cpu.privilege_mode);
+    TEST_ASSERT_EQUAL_UINT32(7, cpu_read_csr(&cpu, CSR_SCAUSE));
+    TEST_ASSERT_EQUAL_UINT32(PMP_DATA, cpu_read_csr(&cpu, CSR_STVAL));
+    TEST_ASSERT_EQUAL_UINT32(0x40, cpu_read_csr(&cpu, CSR_SEPC));
+    mem_free(&mem);
+}
+
+/* funct3 other than 010, unused funct5 values, and (until they are implemented) LR and SC. */
+void test_amo_reserved_encodings_are_illegal(void) {
+    const struct { const char *name; uint32_t raw; } v[] = {
+        {"funct3 = 3 (the doubleword form)", 0x003130AF},
+        {"funct5 = 0x05",                    0x283120AF},
+        {"funct5 = 0x06",                    0x303120AF},
+        {"funct5 = 0x1F",                    0xF83120AF},
+        {"LR.W (step 3)",                    0x100120AF},
+        {"SC.W (step 3)",                    0x183120AF},
+    };
+    const PrivMode modes[] = {PRV_U, PRV_S, PRV_M};
+    for (unsigned i = 0; i < sizeof v / sizeof v[0]; i++) {
+        for (unsigned m = 0; m < 3; m++) {
+            assert_illegal_in_mode(modes[m], 0, v[i].raw, v[i].name);
+        }
+    }
+}
+
+void test_amo_retires_and_a_faulting_amo_does_not(void) {
+    CPU cpu; Memory mem;
+    pmp_rig(&cpu, &mem, PRV_M);
+    mem_write32(&mem, PMP_DATA, 5);
+    mem_write32(&mem, 0x40, AMOADD_W);
+    cpu_write_reg(&cpu, 2, PMP_DATA);
+    cpu_write_reg(&cpu, 3, 3);
+    cpu.pc = 0x40;
+    cpu_step(&cpu, &mem);
+    TEST_ASSERT_EQUAL_UINT64(1, cpu.minstret);
+    TEST_ASSERT_EQUAL_HEX32(8, amo_memory(&mem));
+    mem_free(&mem);
+
+    pmp_rig(&cpu, &mem, PRV_M);
+    mem_write32(&mem, 0x40, AMOADD_W);
+    cpu_write_reg(&cpu, 2, PMP_DATA + 1);                         /* misaligned */
+    cpu.pc = 0x40;
+    cpu_step(&cpu, &mem);
+    TEST_ASSERT_EQUAL_UINT64(0, cpu.minstret);
+    mem_free(&mem);
+}
+
 /* Read-only CSR addresses (csr[11:10] == 0b11), here 0xF14 (mhartid) */
 void test_csrrw_read_only_csr_traps(void) {
     assert_csr_access_illegal(0xF1409073, 0xF14, 7); // CSRRW x0, mhartid, x1
@@ -3501,6 +3722,16 @@ int main(void) {
     RUN_TEST(test_m_register_aliasing_and_x0);
     RUN_TEST(test_m_instruction_retires);
     RUN_TEST(test_m_reserved_funct7_still_traps);
+    RUN_TEST(test_amo_operations);
+    RUN_TEST(test_amo_aq_and_rl_are_ignored);
+    RUN_TEST(test_amo_with_rd_x0_still_updates_memory);
+    RUN_TEST(test_amo_rd_may_alias_a_source);
+    RUN_TEST(test_amo_misaligned_address_raises_address_misaligned);
+    RUN_TEST(test_amo_outside_memory_is_a_store_access_fault);
+    RUN_TEST(test_amo_pmp);
+    RUN_TEST(test_amo_pmp_fault_can_be_delegated_to_s);
+    RUN_TEST(test_amo_reserved_encodings_are_illegal);
+    RUN_TEST(test_amo_retires_and_a_faulting_amo_does_not);
     RUN_TEST(test_csrr_misa_reports_the_implemented_extensions);
     RUN_TEST(test_csrr_tdata1_reads_zero);
     RUN_TEST(test_tdata1_write_does_not_read_back);
