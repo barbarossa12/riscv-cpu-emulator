@@ -8,6 +8,7 @@ static uint32_t execute_lui(CPU *cpu, Memory *mem, DecodedInstruction *instr, ui
 static uint32_t execute_auipc(CPU *cpu, Memory *mem, DecodedInstruction *instr, uint32_t pc);
 static uint32_t execute_load(CPU *cpu, Memory *mem, DecodedInstruction *instr, uint32_t pc);
 static uint32_t execute_store(CPU *cpu, Memory *mem, DecodedInstruction *instr, uint32_t pc);
+static uint32_t execute_amo(CPU *cpu, Memory *mem, DecodedInstruction *instr, uint32_t pc);
 static uint32_t execute_branch(CPU *cpu, Memory *mem, DecodedInstruction *instr, uint32_t pc);
 static uint32_t execute_jal(CPU *cpu, Memory *mem, DecodedInstruction *instr, uint32_t pc);
 static uint32_t execute_jalr(CPU *cpu, Memory *mem, DecodedInstruction *instr, uint32_t pc);
@@ -336,6 +337,52 @@ static uint32_t execute_store(CPU *cpu, Memory *mem, DecodedInstruction *instr, 
         default:
             return trap_enter(cpu, pc, 2, instr->raw); // illegal instruction
     }
+    return pc + 4;
+}
+
+static bool amo_funct5_valid(uint32_t funct5) {
+    switch (funct5) {
+        case 0x00: case 0x01: case 0x04: case 0x08: case 0x0C:
+        case 0x10: case 0x14: case 0x18: case 0x1C:
+            return true;
+        default:
+            return false;                       // includes LR (0x02) and SC (0x03) until they are implemented
+    }
+}
+
+static uint32_t amo_result(uint32_t funct5, uint32_t old, uint32_t src) {
+    switch (funct5) {
+        case 0x00: return old + src;                                    // AMOADD
+        case 0x01: return src;                                          // AMOSWAP
+        case 0x04: return old ^ src;                                    // AMOXOR
+        case 0x08: return old | src;                                    // AMOOR
+        case 0x0C: return old & src;                                    // AMOAND
+        case 0x10: return (int32_t)old < (int32_t)src ? old : src;      // AMOMIN
+        case 0x14: return (int32_t)old > (int32_t)src ? old : src;      // AMOMAX
+        case 0x18: return old < src ? old : src;                        // AMOMINU
+        default:   return old > src ? old : src;                        // AMOMAXU (0x1C)
+    }
+}
+
+// A extension, atomic memory operations (opcode 0101111). funct7 = funct5:aq:rl; aq and rl only
+// order accesses between harts, so they are ignored.
+static uint32_t execute_amo(CPU *cpu, Memory *mem, DecodedInstruction *instr, uint32_t pc) {
+    uint32_t funct5 = instr->funct7 >> 2;
+    if (instr->funct3 != 0x2 || !amo_funct5_valid(funct5)) {
+        return trap_enter(cpu, pc, 2, instr->raw);         // only the word forms exist on RV32
+    }
+    uint32_t addr = cpu_read_reg(cpu, instr->rs1);
+    uint32_t src = cpu_read_reg(cpu, instr->rs2);          // read both sources before rd is written
+    if (addr & 0x3u) {
+        return trap_enter(cpu, pc, 6, addr);               // store/AMO address-misaligned
+    }
+    uint32_t old;
+    // An AMO reads and writes; W without R cannot exist under our PMP rules, so a write check covers both.
+    if (!data_access_ok(cpu, addr, 4, PMP_ACCESS_WRITE) || !mem_try_read32(mem, addr, &old) ||
+        !mem_try_write32(mem, addr, amo_result(funct5, old, src))) {
+        return trap_enter(cpu, pc, 7, addr);               // store/AMO access fault
+    }
+    cpu_write_reg(cpu, instr->rd, old);
     return pc + 4;
 }
 
@@ -740,6 +787,7 @@ void execute(CPU *cpu, Memory *mem, DecodedInstruction *instr) {
         case 0x67: cpu->pc = execute_jalr(cpu, mem, instr, pc); break;
         case 0x0F: cpu->pc = execute_fence(cpu, mem, instr, pc); break;
         case 0x73: cpu->pc = execute_system(cpu, mem, instr, pc); break;
+        case 0x2F: cpu->pc = execute_amo(cpu, mem, instr, pc); break;
         default:
             cpu->pc = trap_enter(cpu, pc, 2, instr->raw); // illegal instruction
         break;
