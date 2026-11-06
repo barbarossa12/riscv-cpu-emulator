@@ -34,37 +34,37 @@ static uint32_t execute_op_imm(CPU *cpu, Memory *mem, DecodedInstruction *instr,
         {
             uint32_t rs1_val = cpu_read_reg(cpu, instr->rs1);
             cpu_write_reg(cpu, instr->rd, rs1_val + instr->imm);
-            return pc + 4;
+            return pc + instr->length;
         }
         case 0x02: // SLTI
         {
             uint32_t rs1_val = cpu_read_reg(cpu, instr->rs1);
             cpu_write_reg(cpu, instr->rd, ((int32_t)rs1_val < instr->imm) ? 1 : 0);
-            return pc + 4;
+            return pc + instr->length;
         }
         case 0x03: // SLTIU
         {
             uint32_t rs1_val = cpu_read_reg(cpu, instr->rs1);
             cpu_write_reg(cpu, instr->rd, (rs1_val < (uint32_t)instr->imm) ? 1 : 0);
-            return pc + 4;
+            return pc + instr->length;
         }
         case 0x04: // XORI
         {
             uint32_t rs1_val = cpu_read_reg(cpu, instr->rs1);
             cpu_write_reg(cpu, instr->rd, rs1_val ^ (uint32_t)instr->imm);
-            return pc + 4;
+            return pc + instr->length;
         }
         case 0x06: // ORI
         {
             uint32_t rs1_val = cpu_read_reg(cpu, instr->rs1);
             cpu_write_reg(cpu, instr->rd, rs1_val | (uint32_t)instr->imm);
-            return pc + 4;
+            return pc + instr->length;
         }
         case 0x07: // ANDI
         {
             uint32_t rs1_val = cpu_read_reg(cpu, instr->rs1);
             cpu_write_reg(cpu, instr->rd, rs1_val & (uint32_t)instr->imm);
-            return pc + 4;
+            return pc + instr->length;
         }
         case 0x1: // SLLI
         {
@@ -73,7 +73,7 @@ static uint32_t execute_op_imm(CPU *cpu, Memory *mem, DecodedInstruction *instr,
             }
             uint32_t rs1_val = cpu_read_reg(cpu, instr->rs1);
             cpu_write_reg(cpu, instr->rd, rs1_val << instr->rs2);
-            return pc + 4;
+            return pc + instr->length;
         }
         case 0x05: // SRLI or SRAI
         {
@@ -90,12 +90,12 @@ static uint32_t execute_op_imm(CPU *cpu, Memory *mem, DecodedInstruction *instr,
                 }
                 cpu_write_reg(cpu, instr->rd, shifted);
             }
-            return pc + 4;
+            return pc + instr->length;
         }
         default:
             return trap_enter(cpu, pc, 2, instr->raw); // illegal instruction
     }
-    return pc + 4;
+    return pc + instr->length;
 }
 
 static uint32_t mulhu(uint32_t a, uint32_t b) {
@@ -130,7 +130,7 @@ static uint32_t execute_op(CPU *cpu, Memory *mem, DecodedInstruction *instr, uin
         uint32_t a = cpu_read_reg(cpu, instr->rs1);
         uint32_t b = cpu_read_reg(cpu, instr->rs2);
         cpu_write_reg(cpu, instr->rd, muldiv(instr->funct3, a, b));
-        return pc + 4;
+        return pc + instr->length;
     }
     // funct7 is 0x00 for every OP instruction except SUB and SRA, which use 0x20
     bool uses_alt = (instr->funct3 == 0x0 || instr->funct3 == 0x5);
@@ -147,35 +147,35 @@ static uint32_t execute_op(CPU *cpu, Memory *mem, DecodedInstruction *instr, uin
             } else { // SUB (funct7 == 0x20)
                 cpu_write_reg(cpu, instr->rd, rs1_val - rs2_val); // SUB
             }
-            return pc + 4;
+            return pc + instr->length;
         }
         case 0x1: // SLL
         {
             uint32_t rs1_val = cpu_read_reg(cpu, instr->rs1);
             uint32_t rs2_val = cpu_read_reg(cpu, instr->rs2);
             cpu_write_reg(cpu, instr->rd, rs1_val << (rs2_val & 0x1F));
-            return pc + 4;
+            return pc + instr->length;
         }
         case 0x2: // SLT
         {
             uint32_t rs1_val = cpu_read_reg(cpu, instr->rs1);
             uint32_t rs2_val = cpu_read_reg(cpu, instr->rs2);
             cpu_write_reg(cpu, instr->rd, ((int32_t)rs1_val < (int32_t)rs2_val) ? 1 : 0);
-            return pc + 4;
+            return pc + instr->length;
         }
         case 0x3: // SLTU
         {
             uint32_t rs1_val = cpu_read_reg(cpu, instr->rs1);
             uint32_t rs2_val = cpu_read_reg(cpu, instr->rs2);
             cpu_write_reg(cpu, instr->rd, (rs1_val < rs2_val) ? 1 : 0);
-            return pc + 4;
+            return pc + instr->length;
         }
         case 0x4: // XOR
         {
             uint32_t rs1_val = cpu_read_reg(cpu, instr->rs1);
             uint32_t rs2_val = cpu_read_reg(cpu, instr->rs2);
             cpu_write_reg(cpu, instr->rd, rs1_val ^ rs2_val);
-            return pc + 4;
+            return pc + instr->length;
         }
         case 0x5: // SRL or SRA
         {
@@ -191,38 +191,38 @@ static uint32_t execute_op(CPU *cpu, Memory *mem, DecodedInstruction *instr, uin
                 }
                 cpu_write_reg(cpu, instr->rd, shifted);
             }
-            return pc + 4;
+            return pc + instr->length;
         }
         case 0x6: // OR
         {
             uint32_t rs1_val = cpu_read_reg(cpu, instr->rs1);
             uint32_t rs2_val = cpu_read_reg(cpu, instr->rs2);
             cpu_write_reg(cpu, instr->rd, rs1_val | rs2_val);
-            return pc + 4;
+            return pc + instr->length;
         }
         case 0x7: // AND
         {
             uint32_t rs1_val = cpu_read_reg(cpu, instr->rs1);
             uint32_t rs2_val = cpu_read_reg(cpu, instr->rs2);
             cpu_write_reg(cpu, instr->rd, rs1_val & rs2_val);
-            return pc + 4;
+            return pc + instr->length;
         }
         default:
             return trap_enter(cpu, pc, 2, instr->raw); // illegal instruction
     }
-    return pc + 4;
+    return pc + instr->length;
 }
 
 static uint32_t execute_lui(CPU *cpu, Memory *mem, DecodedInstruction *instr, uint32_t pc) {
     (void)mem;
     cpu_write_reg(cpu, instr->rd, (uint32_t)instr->imm);
-    return pc + 4;
+    return pc + instr->length;
 }
 
 static uint32_t execute_auipc(CPU *cpu, Memory *mem, DecodedInstruction *instr, uint32_t pc) {
     (void)mem;
     cpu_write_reg(cpu, instr->rd, pc + (uint32_t)instr->imm);
-    return pc + 4;
+    return pc + instr->length;
 }
 
 // The privilege mode a load or store is checked at. With MPRV set it is MPP, not the current mode
@@ -250,7 +250,7 @@ static uint32_t execute_load(CPU *cpu, Memory *mem, DecodedInstruction *instr, u
                 return trap_enter(cpu, pc, 5, addr); // load access fault
             }
             cpu_write_reg(cpu, instr->rd, (uint32_t)(int32_t)(int8_t)byte_val);  // sign-extend
-            return pc + 4;
+            return pc + instr->length;
         }
         case 0x1: // LH
         {
@@ -261,7 +261,7 @@ static uint32_t execute_load(CPU *cpu, Memory *mem, DecodedInstruction *instr, u
                 return trap_enter(cpu, pc, 5, addr); // load access fault
             }
             cpu_write_reg(cpu, instr->rd, (uint32_t)(int32_t)(int16_t)half_val); // sign extended
-            return pc + 4;
+            return pc + instr->length;
         }
         case 0x2: // LW
         {
@@ -272,7 +272,7 @@ static uint32_t execute_load(CPU *cpu, Memory *mem, DecodedInstruction *instr, u
                 return trap_enter(cpu, pc, 5, addr); // load access fault
             }
             cpu_write_reg(cpu, instr->rd, word);
-            return pc + 4;
+            return pc + instr->length;
         }
         case 0x4: // LBU
         {
@@ -283,7 +283,7 @@ static uint32_t execute_load(CPU *cpu, Memory *mem, DecodedInstruction *instr, u
                 return trap_enter(cpu, pc, 5, addr); // load access fault
             }
             cpu_write_reg(cpu, instr->rd, (uint32_t)byte_val);           // zero-extend
-            return pc + 4;
+            return pc + instr->length;
         }
         case 0x5: // LHU
         {
@@ -294,12 +294,12 @@ static uint32_t execute_load(CPU *cpu, Memory *mem, DecodedInstruction *instr, u
                 return trap_enter(cpu, pc, 5, addr); // load access fault
             }
             cpu_write_reg(cpu, instr->rd, (uint32_t)half_val); //zero-extended
-            return pc + 4;
+            return pc + instr->length;
         }
         default:
             return trap_enter(cpu, pc, 2, instr->raw); // illegal instruction
     }
-    return pc + 4;
+    return pc + instr->length;
 }
 
 static uint32_t execute_store(CPU *cpu, Memory *mem, DecodedInstruction *instr, uint32_t pc) {
@@ -312,7 +312,7 @@ static uint32_t execute_store(CPU *cpu, Memory *mem, DecodedInstruction *instr, 
             if (!data_access_ok(cpu, addr, 1, PMP_ACCESS_WRITE) || !mem_try_write8(mem, addr, (uint8_t)rs2_val)) {
                 return trap_enter(cpu, pc, 7, addr); // store/AMO access fault
             }
-            return pc + 4;
+            return pc + instr->length;
         }
         case 0x1: // SH
         {
@@ -322,7 +322,7 @@ static uint32_t execute_store(CPU *cpu, Memory *mem, DecodedInstruction *instr, 
             if (!data_access_ok(cpu, addr, 2, PMP_ACCESS_WRITE) || !mem_try_write16(mem, addr, (uint16_t)rs2_val)) {
                 return trap_enter(cpu, pc, 7, addr); // store/AMO access fault
             }
-            return pc + 4;
+            return pc + instr->length;
         }
         case 0x2: // SW
         {
@@ -332,12 +332,12 @@ static uint32_t execute_store(CPU *cpu, Memory *mem, DecodedInstruction *instr, 
             if (!data_access_ok(cpu, addr, 4, PMP_ACCESS_WRITE) || !mem_try_write32(mem, addr, rs2_val)) {
                 return trap_enter(cpu, pc, 7, addr); // store/AMO access fault
             }
-            return pc + 4;
+            return pc + instr->length;
         }
         default:
             return trap_enter(cpu, pc, 2, instr->raw); // illegal instruction
     }
-    return pc + 4;
+    return pc + instr->length;
 }
 
 static bool amo_funct5_valid(uint32_t funct5) {
@@ -382,7 +382,7 @@ static uint32_t execute_lr_sc(CPU *cpu, Memory *mem, DecodedInstruction *instr, 
         cpu->lr_valid = true;
         cpu->lr_addr = addr;
         cpu_write_reg(cpu, instr->rd, value);
-        return pc + 4;
+        return pc + instr->length;
     }
     uint32_t src = cpu_read_reg(cpu, instr->rs2);          // SC.W: read both sources before rd is written
     if (addr & 0x3u) {
@@ -397,7 +397,7 @@ static uint32_t execute_lr_sc(CPU *cpu, Memory *mem, DecodedInstruction *instr, 
     }
     cpu->lr_valid = false;                                 // success or failure
     cpu_write_reg(cpu, instr->rd, success ? 0 : 1);
-    return pc + 4;
+    return pc + instr->length;
 }
 
 // A extension, atomic memory operations (opcode 0101111). funct7 = funct5:aq:rl; aq and rl only
@@ -425,7 +425,7 @@ static uint32_t execute_amo(CPU *cpu, Memory *mem, DecodedInstruction *instr, ui
         return trap_enter(cpu, pc, 7, addr);               // store/AMO access fault
     }
     cpu_write_reg(cpu, instr->rd, old);
-    return pc + 4;
+    return pc + instr->length;
 }
 
 static uint32_t execute_branch(CPU *cpu, Memory *mem, DecodedInstruction *instr, uint32_t pc) {
@@ -438,7 +438,7 @@ static uint32_t execute_branch(CPU *cpu, Memory *mem, DecodedInstruction *instr,
             if(rs1_val == rs2_val) {
                 return take_branch(cpu, pc, instr);
             }
-            return pc + 4;
+            return pc + instr->length;
         }
         case 0x1: // BNE
         {
@@ -447,7 +447,7 @@ static uint32_t execute_branch(CPU *cpu, Memory *mem, DecodedInstruction *instr,
             if(rs1_val != rs2_val) {
                 return take_branch(cpu, pc, instr);
             }
-            return pc + 4;
+            return pc + instr->length;
         }
         case 0x4: // BLT
         {
@@ -456,7 +456,7 @@ static uint32_t execute_branch(CPU *cpu, Memory *mem, DecodedInstruction *instr,
             if((int32_t)rs1_val < (int32_t)rs2_val) {
                 return take_branch(cpu, pc, instr);
             }
-            return pc + 4;
+            return pc + instr->length;
         }
         case 0x5: // BGE
         {
@@ -465,7 +465,7 @@ static uint32_t execute_branch(CPU *cpu, Memory *mem, DecodedInstruction *instr,
             if((int32_t)rs1_val >= (int32_t)rs2_val) {
                 return take_branch(cpu, pc, instr);
             }
-            return pc + 4;
+            return pc + instr->length;
         }
         case 0x6: // BLTU
         {
@@ -474,7 +474,7 @@ static uint32_t execute_branch(CPU *cpu, Memory *mem, DecodedInstruction *instr,
             if(rs1_val < rs2_val) {
                 return take_branch(cpu, pc, instr);
             }
-            return pc + 4;
+            return pc + instr->length;
         }
         case 0x7: // BGEU
         {
@@ -483,12 +483,12 @@ static uint32_t execute_branch(CPU *cpu, Memory *mem, DecodedInstruction *instr,
             if(rs1_val >= rs2_val) {
                 return take_branch(cpu, pc, instr);
             }
-            return pc + 4;
+            return pc + instr->length;
         }
         default:
             return trap_enter(cpu, pc, 2, instr->raw); // illegal instruction
     }
-    return pc + 4;
+    return pc + instr->length;
 }
 
 static uint32_t execute_jal(CPU *cpu, Memory *mem, DecodedInstruction *instr, uint32_t pc) {
@@ -497,7 +497,7 @@ static uint32_t execute_jal(CPU *cpu, Memory *mem, DecodedInstruction *instr, ui
     if (target_misaligned(target)) {
         return trap_enter(cpu, pc, 0, target); // instruction address misaligned
     }
-    cpu_write_reg(cpu, instr->rd, pc + 4);
+    cpu_write_reg(cpu, instr->rd, pc + instr->length);
     return target;
 }
 
@@ -511,13 +511,13 @@ static uint32_t execute_jalr(CPU *cpu, Memory *mem, DecodedInstruction *instr, u
             if (target_misaligned(target)) {
                 return trap_enter(cpu, pc, 0, target); // instruction address misaligned
             }
-            cpu_write_reg(cpu, instr->rd, pc + 4);
+            cpu_write_reg(cpu, instr->rd, pc + instr->length);
             return target;
         }
         default:
             return trap_enter(cpu, pc, 2, instr->raw); // illegal instruction
     }
-    return pc + 4;
+    return pc + instr->length;
 }
 
 static uint32_t execute_fence(CPU *cpu, Memory *mem, DecodedInstruction *instr, uint32_t pc) {
@@ -525,16 +525,16 @@ static uint32_t execute_fence(CPU *cpu, Memory *mem, DecodedInstruction *instr, 
     (void)mem;
     switch (instr->funct3) {
         case 0x0:
-            return pc + 4; // no-op: single-hart, in-order emulator
+            return pc + instr->length; // no-op: single-hart, in-order emulator
         case 0x1:
             // FENCE.I: no-op, there is no instruction cache and every fetch reads
             // memory, so stores are always visible to later fetches. The spec says
             // base implementations ignore funct12, rs1 and rd (zifencei.adoc).
-            return pc + 4;
+            return pc + instr->length;
         default:
             return trap_enter(cpu, pc, 2, instr->raw); // illegal instruction
     }
-    return pc + 4;
+    return pc + instr->length;
 }
 
 
@@ -608,12 +608,12 @@ static uint32_t execute_system(CPU *cpu, Memory *mem, DecodedInstruction *instr,
                     (cpu->privilege_mode == PRV_S && (cpu_read_csr(cpu, CSR_MSTATUS) & MSTATUS_TW))) {
                     return trap_enter(cpu, pc, 2, instr->raw); // U never; S only when TW = 0
                 }
-                return pc + 4; // a legal NOP: there is nothing to wait for yet
+                return pc + instr->length; // a legal NOP: there is nothing to wait for yet
             } else if (is_sfence_vma) {
                 if (cpu->privilege_mode != PRV_M) {
                     return trap_enter(cpu, pc, 2, instr->raw); // satp is read-only 0: illegal in S and U
                 }
-                return pc + 4; // nothing to fence yet
+                return pc + instr->length; // nothing to fence yet
             }
             return trap_enter(cpu, pc, 2, instr->raw); // any other encoding, DRET included, is illegal
         }
@@ -623,7 +623,7 @@ static uint32_t execute_system(CPU *cpu, Memory *mem, DecodedInstruction *instr,
             uint32_t old = cpu_read_csr(cpu, csr_addr);
             cpu_write_csr(cpu, csr_addr, rs1_val);
             cpu_write_reg(cpu, instr->rd, old);
-            return pc + 4;
+            return pc + instr->length;
         }
         case 0x2: // CSRRS
         {
@@ -633,7 +633,7 @@ static uint32_t execute_system(CPU *cpu, Memory *mem, DecodedInstruction *instr,
                 cpu_write_csr(cpu, csr_addr, old | rs1_val);
             }
             cpu_write_reg(cpu, instr->rd, old);
-            return pc + 4;
+            return pc + instr->length;
         }
         case 0x3: // CSRRC
         {
@@ -643,14 +643,14 @@ static uint32_t execute_system(CPU *cpu, Memory *mem, DecodedInstruction *instr,
                 cpu_write_csr(cpu, csr_addr, old & ~rs1_val);
             }
             cpu_write_reg(cpu, instr->rd, old);
-            return pc + 4;
+            return pc + instr->length;
         }
         case 0x5: // CSRRWI
         {
             uint32_t old = cpu_read_csr(cpu, csr_addr);
             cpu_write_csr(cpu, csr_addr, (uint32_t)instr->rs1); // rs1 field holds uimm here
             cpu_write_reg(cpu, instr->rd, old);
-            return pc + 4;
+            return pc + instr->length;
         }
         case 0x6: // CSRRSI
         {
@@ -659,7 +659,7 @@ static uint32_t execute_system(CPU *cpu, Memory *mem, DecodedInstruction *instr,
                 cpu_write_csr(cpu, csr_addr, old | (uint32_t)instr->rs1);
             }
             cpu_write_reg(cpu, instr->rd, old);
-            return pc + 4;
+            return pc + instr->length;
         }
         case 0x7: // CSRRCI
         {
@@ -668,12 +668,12 @@ static uint32_t execute_system(CPU *cpu, Memory *mem, DecodedInstruction *instr,
                 cpu_write_csr(cpu, csr_addr, old & ~(uint32_t)instr->rs1);
             }
             cpu_write_reg(cpu, instr->rd, old);
-            return pc + 4;
+            return pc + instr->length;
         }
         default:
             return trap_enter(cpu, pc, 2, instr->raw); // illegal instruction
     }
-    return pc + 4;
+    return pc + instr->length;
 }
 
 // Only the CSRs we implement exist; every other address is reserved and traps
