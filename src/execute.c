@@ -548,6 +548,10 @@ static uint32_t execute_system(CPU *cpu, Memory *mem, DecodedInstruction *instr,
     if (instr->funct3 != 0 && !counter_access_ok(cpu, cpu->privilege_mode, csr_addr)) {
         return trap_enter(cpu, pc, 2, instr->raw); // counter not enabled for this mode
     }
+    if (instr->funct3 != 0 && csr_addr == CSR_SATP && cpu->privilege_mode == PRV_S &&
+        (cpu_read_csr(cpu, CSR_MSTATUS) & MSTATUS_TVM)) {
+        return trap_enter(cpu, pc, 2, instr->raw); // TVM = 1: S-mode may not touch satp
+    }
     if (csr_is_read_only(csr_addr) && csr_instr_writes(instr)) {
         return trap_enter(cpu, pc, 2, instr->raw); // write to a read-only CSR: illegal instruction
     }
@@ -604,10 +608,11 @@ static uint32_t execute_system(CPU *cpu, Memory *mem, DecodedInstruction *instr,
                 }
                 return pc + instr->length; // a legal NOP: there is nothing to wait for yet
             } else if (is_sfence_vma) {
-                if (cpu->privilege_mode != PRV_M) {
-                    return trap_enter(cpu, pc, 2, instr->raw); // satp is read-only 0: illegal in S and U
+                if (cpu->privilege_mode == PRV_U ||
+                    (cpu->privilege_mode == PRV_S && (cpu_read_csr(cpu, CSR_MSTATUS) & MSTATUS_TVM))) {
+                    return trap_enter(cpu, pc, 2, instr->raw); // U never; S only when TVM = 0
                 }
-                return pc + instr->length; // nothing to fence yet
+                return pc + instr->length; // no translation cache yet, so nothing to fence
             }
             return trap_enter(cpu, pc, 2, instr->raw); // any other encoding, DRET included, is illegal
         }

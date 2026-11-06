@@ -1623,8 +1623,8 @@ static void run_on(CPU *cpu, uint32_t encoding) {
     mem_free(&mem);
 }
 
-/* satp is read-only 0 until Milestone 5: it never traps in S or M, and a write has no effect. */
-void test_satp_access_does_not_trap_and_stays_zero(void) {
+/* satp does not trap in S or M (TVM clear), and a write lands in all 32 bits. */
+void test_satp_access_does_not_trap_and_holds_what_was_written(void) {
     const PrivMode modes[] = {PRV_S, PRV_M};
     for (unsigned i = 0; i < 2; i++) {
         CPU cpu; test_cpu_reset_in_mode(&cpu, modes[i]);
@@ -1633,7 +1633,7 @@ void test_satp_access_does_not_trap_and_stays_zero(void) {
         TEST_ASSERT_EQUAL_UINT32(4, cpu.pc);            // no trap
         TEST_ASSERT_EQUAL_INT(modes[i], cpu.privilege_mode);
         run_on(&cpu, 0x18002173);                       // CSRRS x2, satp, x0
-        TEST_ASSERT_EQUAL_UINT32(0, cpu_read_reg(&cpu, 2));
+        TEST_ASSERT_EQUAL_UINT32(0xFFFFFFFF, cpu_read_reg(&cpu, 2));
     }
 }
 
@@ -1909,18 +1909,63 @@ void test_wfi_by_mode_and_tw(void) {
     }
 }
 
-/* satp is read-only 0, so SFENCE.VMA is illegal in S and U, and a NOP in M. */
+/* SFENCE.VMA: illegal in U; in S only when TVM = 0; always legal in M. There is no translation cache
+ * yet, so a legal one just advances the pc and changes nothing. */
 void test_sfence_vma_by_mode(void) {
+    const struct { const char *name; PrivMode mode; uint32_t mstatus; bool legal; } v[] = {
+        {"U, TVM clear", PRV_U, 0,           false},
+        {"U, TVM set",   PRV_U, MSTATUS_TVM, false},
+        {"S, TVM clear", PRV_S, 0,           true },
+        {"S, TVM set",   PRV_S, MSTATUS_TVM, false},
+        {"M, TVM clear", PRV_M, 0,           true },
+        {"M, TVM set",   PRV_M, MSTATUS_TVM, true },
+    };
     const uint32_t words[] = {SFENCE_X0_X0, SFENCE_X1_X2};
-    for (unsigned i = 0; i < 2; i++) {
-        assert_illegal_in_mode(PRV_U, 0, words[i], "sfence.vma");
-        assert_illegal_in_mode(PRV_S, 0, words[i], "sfence.vma");
-        CPU cpu; cpu_reset(&cpu);
-        cpu_write_reg(&cpu, 1, 0xABC);
-        cpu_write_reg(&cpu, 2, 0x5);
-        run_trap_case(&cpu, words[i]);
-        TEST_ASSERT_EQUAL_UINT32(0x44, cpu.pc);
-        TEST_ASSERT_EQUAL_INT(PRV_M, cpu.privilege_mode);
+    for (unsigned i = 0; i < sizeof v / sizeof v[0]; i++) {
+        for (unsigned w = 0; w < 2; w++) {
+            if (!v[i].legal) {
+                assert_illegal_in_mode(v[i].mode, v[i].mstatus, words[w], v[i].name);
+                continue;
+            }
+            CPU cpu; test_cpu_reset_in_mode(&cpu, v[i].mode);
+            cpu_write_csr(&cpu, CSR_MSTATUS, v[i].mstatus);
+            cpu_write_reg(&cpu, 1, 0xABC);
+            cpu_write_reg(&cpu, 2, 0x5);
+            cpu_write_csr(&cpu, CSR_MCAUSE, 0x77);
+            run_trap_case(&cpu, words[w]);
+            TEST_ASSERT_EQUAL_UINT32_MESSAGE(0x44, cpu.pc, v[i].name);
+            TEST_ASSERT_EQUAL_INT_MESSAGE(v[i].mode, cpu.privilege_mode, v[i].name);
+            TEST_ASSERT_EQUAL_UINT32_MESSAGE(0x77, cpu_read_csr(&cpu, CSR_MCAUSE), v[i].name);
+            TEST_ASSERT_EQUAL_UINT32_MESSAGE(0xABC, cpu_read_reg(&cpu, 1), v[i].name);
+        }
+    }
+}
+
+/* With TVM = 1, any CSR instruction on satp from S-mode is illegal, a pure read included. */
+void test_satp_access_with_tvm(void) {
+    const struct { const char *name; uint32_t raw; } v[] = {
+        {"csrrs x2, satp, x0",  0x18002173},
+        {"csrrc x2, satp, x0",  0x18003173},
+        {"csrrw x0, satp, x1",  0x18009073},
+        {"csrrwi x0, satp, 5",  0x1802D073},
+        {"csrrsi x2, satp, 0",  0x18006173},
+        {"csrrci x0, satp, 1",  0x1800F073},
+    };
+    for (unsigned i = 0; i < sizeof v / sizeof v[0]; i++) {
+        assert_illegal_in_mode(PRV_S, MSTATUS_TVM, v[i].raw, v[i].name);
+        assert_illegal_in_mode(PRV_U, 0, v[i].raw, v[i].name);                 /* csr[9:8] needs S */
+        assert_illegal_in_mode(PRV_U, MSTATUS_TVM, v[i].raw, v[i].name);
+        const struct { PrivMode mode; uint32_t mstatus; } ok[] = {
+            {PRV_S, 0}, {PRV_M, 0}, {PRV_M, MSTATUS_TVM},
+        };
+        for (unsigned k = 0; k < 3; k++) {
+            CPU cpu; test_cpu_reset_in_mode(&cpu, ok[k].mode);
+            cpu_write_csr(&cpu, CSR_MSTATUS, ok[k].mstatus);
+            cpu_write_csr(&cpu, CSR_MCAUSE, 0x77);
+            run_trap_case(&cpu, v[i].raw);
+            TEST_ASSERT_EQUAL_UINT32_MESSAGE(0x44, cpu.pc, v[i].name);
+            TEST_ASSERT_EQUAL_UINT32_MESSAGE(0x77, cpu_read_csr(&cpu, CSR_MCAUSE), v[i].name);
+        }
     }
 }
 
@@ -4273,7 +4318,7 @@ int main(void) {
     RUN_TEST(test_csr_write_forms_follow_privilege);
     RUN_TEST(test_counter_gating);
     RUN_TEST(test_counter_enable_does_not_gate_machine_counters);
-    RUN_TEST(test_satp_access_does_not_trap_and_stays_zero);
+    RUN_TEST(test_satp_access_does_not_trap_and_holds_what_was_written);
     RUN_TEST(test_csrrs_sstatus_sets_sie_in_mstatus);
     RUN_TEST(test_csrrc_sstatus_clears_only_s_bits);
     RUN_TEST(test_csrrw_sepc_drops_bit_zero);
@@ -4289,6 +4334,7 @@ int main(void) {
     RUN_TEST(test_sret_retires);
     RUN_TEST(test_wfi_by_mode_and_tw);
     RUN_TEST(test_sfence_vma_by_mode);
+    RUN_TEST(test_satp_access_with_tvm);
     RUN_TEST(test_unknown_system_encodings_are_illegal);
     RUN_TEST(test_reserved_rd_and_rs1_fields_are_illegal);
     RUN_TEST(test_standard_system_words_still_work);
