@@ -346,7 +346,7 @@ static bool amo_funct5_valid(uint32_t funct5) {
         case 0x10: case 0x14: case 0x18: case 0x1C:
             return true;
         default:
-            return false;                       // includes LR (0x02) and SC (0x03) until they are implemented
+            return false;
     }
 }
 
@@ -364,12 +364,54 @@ static uint32_t amo_result(uint32_t funct5, uint32_t old, uint32_t src) {
     }
 }
 
+// LR.W and SC.W (Zalrsc). One hart and no DMA, so only LR and SC themselves change the reservation:
+// it is not cleared on trap entry or xRET, which the manual allows but does not require.
+static uint32_t execute_lr_sc(CPU *cpu, Memory *mem, DecodedInstruction *instr, uint32_t pc, uint32_t funct5) {
+    uint32_t addr = cpu_read_reg(cpu, instr->rs1);
+    if (funct5 == 0x02) {                                  // LR.W: a load that registers a reservation
+        if (instr->rs2 != 0) {
+            return trap_enter(cpu, pc, 2, instr->raw);     // rs2 is a fixed 0 field
+        }
+        uint32_t value;
+        if (addr & 0x3u) {
+            return trap_enter(cpu, pc, 4, addr);           // load address-misaligned
+        }
+        if (!data_access_ok(cpu, addr, 4, PMP_ACCESS_READ) || !mem_try_read32(mem, addr, &value)) {
+            return trap_enter(cpu, pc, 5, addr);           // load access fault
+        }
+        cpu->lr_valid = true;
+        cpu->lr_addr = addr;
+        cpu_write_reg(cpu, instr->rd, value);
+        return pc + 4;
+    }
+    uint32_t src = cpu_read_reg(cpu, instr->rs2);          // SC.W: read both sources before rd is written
+    if (addr & 0x3u) {
+        return trap_enter(cpu, pc, 6, addr);               // store/AMO address-misaligned
+    }
+    bool success = cpu->lr_valid && cpu->lr_addr == addr;
+    uint32_t probe;
+    // A store-conditional must pass the store checks even when it is going to fail.
+    if (!data_access_ok(cpu, addr, 4, PMP_ACCESS_WRITE) || !mem_try_read32(mem, addr, &probe) ||
+        (success && !mem_try_write32(mem, addr, src))) {
+        return trap_enter(cpu, pc, 7, addr);               // store/AMO access fault
+    }
+    cpu->lr_valid = false;                                 // success or failure
+    cpu_write_reg(cpu, instr->rd, success ? 0 : 1);
+    return pc + 4;
+}
+
 // A extension, atomic memory operations (opcode 0101111). funct7 = funct5:aq:rl; aq and rl only
 // order accesses between harts, so they are ignored.
 static uint32_t execute_amo(CPU *cpu, Memory *mem, DecodedInstruction *instr, uint32_t pc) {
     uint32_t funct5 = instr->funct7 >> 2;
-    if (instr->funct3 != 0x2 || !amo_funct5_valid(funct5)) {
+    if (instr->funct3 != 0x2) {
         return trap_enter(cpu, pc, 2, instr->raw);         // only the word forms exist on RV32
+    }
+    if (funct5 == 0x02 || funct5 == 0x03) {
+        return execute_lr_sc(cpu, mem, instr, pc, funct5);
+    }
+    if (!amo_funct5_valid(funct5)) {
+        return trap_enter(cpu, pc, 2, instr->raw);
     }
     uint32_t addr = cpu_read_reg(cpu, instr->rs1);
     uint32_t src = cpu_read_reg(cpu, instr->rs2);          // read both sources before rd is written

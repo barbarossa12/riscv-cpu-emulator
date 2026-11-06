@@ -2664,15 +2664,13 @@ void test_amo_pmp_fault_can_be_delegated_to_s(void) {
     mem_free(&mem);
 }
 
-/* funct3 other than 010, unused funct5 values, and (until they are implemented) LR and SC. */
+/* funct3 other than 010, and unused funct5 values. */
 void test_amo_reserved_encodings_are_illegal(void) {
     const struct { const char *name; uint32_t raw; } v[] = {
         {"funct3 = 3 (the doubleword form)", 0x003130AF},
         {"funct5 = 0x05",                    0x283120AF},
         {"funct5 = 0x06",                    0x303120AF},
         {"funct5 = 0x1F",                    0xF83120AF},
-        {"LR.W (step 3)",                    0x100120AF},
-        {"SC.W (step 3)",                    0x183120AF},
     };
     const PrivMode modes[] = {PRV_U, PRV_S, PRV_M};
     for (unsigned i = 0; i < sizeof v / sizeof v[0]; i++) {
@@ -2697,6 +2695,275 @@ void test_amo_retires_and_a_faulting_amo_does_not(void) {
 
     pmp_rig(&cpu, &mem, PRV_M);
     mem_write32(&mem, 0x40, AMOADD_W);
+    cpu_write_reg(&cpu, 2, PMP_DATA + 1);                         /* misaligned */
+    cpu.pc = 0x40;
+    cpu_step(&cpu, &mem);
+    TEST_ASSERT_EQUAL_UINT64(0, cpu.minstret);
+    mem_free(&mem);
+}
+
+/* ---- A extension: load-reserved and store-conditional ------------------------------------- */
+
+#define LR_W   0x100120AFu   /* LR.W x1, (x2) */
+#define SC_W   0x183120AFu   /* SC.W x1, x3, (x2) */
+#define LRSC_OTHER 0x1004u   /* a second word in the same region */
+
+/* One instruction at pc 0x40 on a machine that is already set up: x1 = a marker, x2 = addr, x3 = src. */
+static void lrsc_exec(CPU *cpu, Memory *mem, uint32_t raw, uint32_t addr, uint32_t src) {
+    cpu_write_reg(cpu, 1, 0x11111111);
+    cpu_write_reg(cpu, 2, addr);
+    cpu_write_reg(cpu, 3, src);
+    cpu->pc = 0x40;
+    DecodedInstruction instr = decode_instruction(raw);
+    execute(cpu, mem, &instr);
+}
+
+/* An empty-PMP M-mode machine with 0x1000 = 0xDEADBEEF and 0x1004 = 0xCAFEF00D. */
+static void lrsc_rig(CPU *cpu, Memory *mem) {
+    pmp_rig(cpu, mem, PRV_M);
+    mem_write32(mem, PMP_DATA, 0xDEADBEEF);
+    mem_write32(mem, LRSC_OTHER, 0xCAFEF00D);
+}
+
+static uint32_t lrsc_word(Memory *mem, uint32_t addr) {
+    uint32_t word = 0;
+    mem_try_read32(mem, addr, &word);
+    return word;
+}
+
+void test_lr_loads_the_word_and_registers_a_reservation(void) {
+    CPU cpu; Memory mem;
+    lrsc_rig(&cpu, &mem);
+    lrsc_exec(&cpu, &mem, LR_W, PMP_DATA, 0);
+    pmp_assert_no_trap(&cpu, "LR");
+    TEST_ASSERT_EQUAL_HEX32(0xDEADBEEF, cpu_read_reg(&cpu, 1));
+    TEST_ASSERT_TRUE(cpu.lr_valid);
+    TEST_ASSERT_EQUAL_HEX32(PMP_DATA, cpu.lr_addr);
+    mem_free(&mem);
+}
+
+void test_lr_with_rd_x0_still_registers_a_reservation(void) {
+    CPU cpu; Memory mem;
+    lrsc_rig(&cpu, &mem);
+    lrsc_exec(&cpu, &mem, 0x1000202F, PMP_DATA, 0);               /* LR.W x0, (x2) */
+    pmp_assert_no_trap(&cpu, "LR rd = x0");
+    TEST_ASSERT_TRUE(cpu.lr_valid);
+    mem_free(&mem);
+}
+
+void test_sc_after_lr_to_the_same_address_succeeds(void) {
+    CPU cpu; Memory mem;
+    lrsc_rig(&cpu, &mem);
+    lrsc_exec(&cpu, &mem, LR_W, PMP_DATA, 0);
+    lrsc_exec(&cpu, &mem, SC_W, PMP_DATA, 0x1234);
+    pmp_assert_no_trap(&cpu, "SC");
+    TEST_ASSERT_EQUAL_HEX32(0, cpu_read_reg(&cpu, 1));
+    TEST_ASSERT_EQUAL_HEX32(0x1234, lrsc_word(&mem, PMP_DATA));
+    TEST_ASSERT_FALSE(cpu.lr_valid);
+    mem_free(&mem);
+}
+
+void test_sc_without_a_reservation_fails(void) {
+    CPU cpu; Memory mem;
+    lrsc_rig(&cpu, &mem);
+    lrsc_exec(&cpu, &mem, SC_W, PMP_DATA, 0x1234);
+    pmp_assert_no_trap(&cpu, "SC");
+    TEST_ASSERT_EQUAL_HEX32(1, cpu_read_reg(&cpu, 1));
+    TEST_ASSERT_EQUAL_HEX32(0xDEADBEEF, lrsc_word(&mem, PMP_DATA));
+    mem_free(&mem);
+}
+
+void test_sc_to_another_address_fails_and_clears_the_reservation(void) {
+    CPU cpu; Memory mem;
+    lrsc_rig(&cpu, &mem);
+    lrsc_exec(&cpu, &mem, LR_W, PMP_DATA, 0);
+    lrsc_exec(&cpu, &mem, SC_W, LRSC_OTHER, 0x1234);
+    TEST_ASSERT_EQUAL_HEX32(1, cpu_read_reg(&cpu, 1));
+    TEST_ASSERT_EQUAL_HEX32(0xCAFEF00D, lrsc_word(&mem, LRSC_OTHER));
+    TEST_ASSERT_FALSE(cpu.lr_valid);
+    lrsc_exec(&cpu, &mem, SC_W, PMP_DATA, 0x1234);                /* the failed SC cleared it */
+    TEST_ASSERT_EQUAL_HEX32(1, cpu_read_reg(&cpu, 1));
+    TEST_ASSERT_EQUAL_HEX32(0xDEADBEEF, lrsc_word(&mem, PMP_DATA));
+    mem_free(&mem);
+}
+
+void test_a_successful_sc_uses_up_the_reservation(void) {
+    CPU cpu; Memory mem;
+    lrsc_rig(&cpu, &mem);
+    lrsc_exec(&cpu, &mem, LR_W, PMP_DATA, 0);
+    lrsc_exec(&cpu, &mem, SC_W, PMP_DATA, 0x1111);
+    lrsc_exec(&cpu, &mem, SC_W, PMP_DATA, 0x2222);
+    TEST_ASSERT_EQUAL_HEX32(1, cpu_read_reg(&cpu, 1));
+    TEST_ASSERT_EQUAL_HEX32(0x1111, lrsc_word(&mem, PMP_DATA));
+    mem_free(&mem);
+}
+
+void test_a_later_lr_replaces_the_reservation(void) {
+    CPU cpu; Memory mem;
+    lrsc_rig(&cpu, &mem);
+    lrsc_exec(&cpu, &mem, LR_W, PMP_DATA, 0);
+    lrsc_exec(&cpu, &mem, LR_W, LRSC_OTHER, 0);
+    lrsc_exec(&cpu, &mem, SC_W, PMP_DATA, 0x1234);                /* the first address is no longer reserved */
+    TEST_ASSERT_EQUAL_HEX32(1, cpu_read_reg(&cpu, 1));
+    TEST_ASSERT_EQUAL_HEX32(0xDEADBEEF, lrsc_word(&mem, PMP_DATA));
+
+    lrsc_exec(&cpu, &mem, LR_W, PMP_DATA, 0);
+    lrsc_exec(&cpu, &mem, LR_W, LRSC_OTHER, 0);
+    lrsc_exec(&cpu, &mem, SC_W, LRSC_OTHER, 0x5678);
+    TEST_ASSERT_EQUAL_HEX32(0, cpu_read_reg(&cpu, 1));
+    TEST_ASSERT_EQUAL_HEX32(0x5678, lrsc_word(&mem, LRSC_OTHER));
+    mem_free(&mem);
+}
+
+void test_lr_sc_aq_and_rl_are_ignored(void) {
+    CPU cpu; Memory mem;
+    lrsc_rig(&cpu, &mem);
+    lrsc_exec(&cpu, &mem, 0x140120AF, PMP_DATA, 0);               /* LR.W.aq */
+    TEST_ASSERT_EQUAL_HEX32(0xDEADBEEF, cpu_read_reg(&cpu, 1));
+    lrsc_exec(&cpu, &mem, 0x1E3120AF, PMP_DATA, 0x1234);          /* SC.W.aq.rl */
+    TEST_ASSERT_EQUAL_HEX32(0, cpu_read_reg(&cpu, 1));
+    TEST_ASSERT_EQUAL_HEX32(0x1234, lrsc_word(&mem, PMP_DATA));
+    mem_free(&mem);
+}
+
+void test_sc_rd_may_be_rs2(void) {
+    CPU cpu; Memory mem;
+    lrsc_rig(&cpu, &mem);
+    lrsc_exec(&cpu, &mem, LR_W, PMP_DATA, 0);
+    lrsc_exec(&cpu, &mem, 0x183121AF, PMP_DATA, 0x1234);          /* SC.W x3, x3, (x2) */
+    TEST_ASSERT_EQUAL_HEX32(0, cpu_read_reg(&cpu, 3));            /* the status replaces rs2 ... */
+    TEST_ASSERT_EQUAL_HEX32(0x1234, lrsc_word(&mem, PMP_DATA));   /* ... after the store used the original */
+    mem_free(&mem);
+}
+
+void test_lr_sc_misaligned_address_raises_address_misaligned(void) {
+    for (uint32_t addr = PMP_DATA + 1; addr <= PMP_DATA + 3; addr++) {
+        CPU cpu; Memory mem;
+        lrsc_rig(&cpu, &mem);
+        lrsc_exec(&cpu, &mem, LR_W, addr, 0);
+        pmp_assert_fault(&cpu, 4, addr, 0x40, PRV_M, "misaligned LR");
+        TEST_ASSERT_FALSE(cpu.lr_valid);
+        TEST_ASSERT_EQUAL_HEX32(0x11111111, cpu_read_reg(&cpu, 1));
+        mem_free(&mem);
+
+        lrsc_rig(&cpu, &mem);
+        lrsc_exec(&cpu, &mem, SC_W, addr, 0x1234);
+        pmp_assert_fault(&cpu, 6, addr, 0x40, PRV_M, "misaligned SC");
+        TEST_ASSERT_EQUAL_HEX32(0x11111111, cpu_read_reg(&cpu, 1));
+        mem_free(&mem);
+    }
+}
+
+void test_lr_sc_outside_memory_is_an_access_fault(void) {
+    const uint32_t addrs[] = {0x4000, 0xFFFFFFFC};
+    for (unsigned i = 0; i < 2; i++) {
+        CPU cpu; Memory mem;
+        lrsc_rig(&cpu, &mem);
+        lrsc_exec(&cpu, &mem, LR_W, addrs[i], 0);
+        pmp_assert_fault(&cpu, 5, addrs[i], 0x40, PRV_M, "LR outside memory");
+        TEST_ASSERT_FALSE(cpu.lr_valid);
+        mem_free(&mem);
+
+        lrsc_rig(&cpu, &mem);                                     /* no reservation: the SC would fail, but still faults */
+        lrsc_exec(&cpu, &mem, SC_W, addrs[i], 0x1234);
+        pmp_assert_fault(&cpu, 7, addrs[i], 0x40, PRV_M, "SC outside memory");
+        mem_free(&mem);
+    }
+}
+
+/* LR needs read permission, SC needs write permission, and an SC that would fail needs it too. */
+void test_lr_sc_pmp(void) {
+    const struct { const char *name; PrivMode mode; uint8_t cfg; uint32_t raw; bool ok; uint32_t fault; } v[] = {
+        {"LR, U, read-only",     PRV_U, 0x19, LR_W, true,  0},
+        {"LR, U, execute-only",  PRV_U, 0x1C, LR_W, false, 5},
+        {"LR, U, no entries",    PRV_U, 0,    LR_W, false, 5},
+        {"LR, S, read-only",     PRV_S, 0x19, LR_W, true,  0},
+        {"SC, U, read-write",    PRV_U, 0x1B, SC_W, true,  0},
+        {"SC, U, read-only",     PRV_U, 0x19, SC_W, false, 7},
+        {"SC, S, read-only",     PRV_S, 0x19, SC_W, false, 7},
+        {"SC, U, no entries",    PRV_U, 0,    SC_W, false, 7},
+    };
+    for (unsigned i = 0; i < sizeof v / sizeof v[0]; i++) {
+        CPU cpu; Memory mem;
+        pmp_rig(&cpu, &mem, v[i].mode);
+        if (v[i].cfg) {
+            pmp_data_region(&cpu, 0, v[i].cfg);
+        }
+        mem_write32(&mem, PMP_DATA, 0xDEADBEEF);
+        lrsc_exec(&cpu, &mem, v[i].raw, PMP_DATA, 0x1234);
+        if (v[i].ok) {
+            pmp_assert_no_trap(&cpu, v[i].name);
+        } else {
+            pmp_assert_fault(&cpu, v[i].fault, PMP_DATA, 0x40, v[i].mode, v[i].name);
+            TEST_ASSERT_EQUAL_HEX32_MESSAGE(0x11111111, cpu_read_reg(&cpu, 1), v[i].name);
+            TEST_ASSERT_EQUAL_HEX32_MESSAGE(0xDEADBEEF, lrsc_word(&mem, PMP_DATA), v[i].name);
+        }
+        mem_free(&mem);
+    }
+}
+
+void test_lr_with_nonzero_rs2_and_other_funct3_are_illegal(void) {
+    const struct { const char *name; uint32_t raw; } v[] = {
+        {"LR.W with rs2 = x3",         0x103120AF},
+        {"LR.W with rs2 = x1",         0x101120AF},
+        {"LR with funct3 = 3",         0x100130AF},
+        {"SC with funct3 = 3",         0x183130AF},
+    };
+    const PrivMode modes[] = {PRV_U, PRV_S, PRV_M};
+    for (unsigned i = 0; i < sizeof v / sizeof v[0]; i++) {
+        for (unsigned m = 0; m < 3; m++) {
+            assert_illegal_in_mode(modes[m], 0, v[i].raw, v[i].name);
+        }
+    }
+}
+
+void test_a_faulting_lr_or_sc_keeps_the_reservation(void) {
+    CPU cpu; Memory mem;
+    lrsc_rig(&cpu, &mem);
+    lrsc_exec(&cpu, &mem, LR_W, PMP_DATA, 0);
+    lrsc_exec(&cpu, &mem, SC_W, PMP_DATA + 1, 0x1234);            /* misaligned SC traps */
+    TEST_ASSERT_TRUE(cpu.lr_valid);
+    lrsc_exec(&cpu, &mem, LR_W, 0x4000, 0);                       /* LR outside memory traps */
+    TEST_ASSERT_TRUE(cpu.lr_valid);
+    lrsc_exec(&cpu, &mem, SC_W, 0x4000, 0x1234);                  /* SC access fault traps */
+    TEST_ASSERT_TRUE(cpu.lr_valid);
+    TEST_ASSERT_EQUAL_HEX32(PMP_DATA, cpu.lr_addr);
+    lrsc_exec(&cpu, &mem, SC_W, PMP_DATA, 0x1234);
+    TEST_ASSERT_EQUAL_HEX32(0, cpu_read_reg(&cpu, 1));
+    mem_free(&mem);
+}
+
+/* The manual allows xRET to clear the reservation but does not require it. We do not. */
+void test_the_reservation_survives_a_trap_and_mret(void) {
+    CPU cpu; Memory mem;
+    lrsc_rig(&cpu, &mem);
+    lrsc_exec(&cpu, &mem, LR_W, PMP_DATA, 0);
+    lrsc_exec(&cpu, &mem, 0x00000073, 0, 0);                      /* ECALL: trap to mtvec */
+    TEST_ASSERT_EQUAL_UINT32(0x3000, cpu.pc);
+    TEST_ASSERT_TRUE(cpu.lr_valid);
+    cpu_write_reg(&cpu, 2, PMP_DATA);
+    cpu_write_reg(&cpu, 3, 0x1234);
+    DecodedInstruction mret = decode_instruction(0x30200073);
+    execute(&cpu, &mem, &mret);
+    TEST_ASSERT_TRUE(cpu.lr_valid);
+    cpu.pc = 0x40;
+    DecodedInstruction sc = decode_instruction(SC_W);
+    execute(&cpu, &mem, &sc);
+    TEST_ASSERT_EQUAL_HEX32(0, cpu_read_reg(&cpu, 1));
+    mem_free(&mem);
+}
+
+void test_lr_sc_retire_and_a_faulting_one_does_not(void) {
+    CPU cpu; Memory mem;
+    lrsc_rig(&cpu, &mem);
+    mem_write32(&mem, 0x40, LR_W);
+    cpu_write_reg(&cpu, 2, PMP_DATA);
+    cpu.pc = 0x40;
+    cpu_step(&cpu, &mem);
+    TEST_ASSERT_EQUAL_UINT64(1, cpu.minstret);
+
+    lrsc_rig(&cpu, &mem);
+    mem_write32(&mem, 0x40, SC_W);
     cpu_write_reg(&cpu, 2, PMP_DATA + 1);                         /* misaligned */
     cpu.pc = 0x40;
     cpu_step(&cpu, &mem);
@@ -3732,6 +3999,22 @@ int main(void) {
     RUN_TEST(test_amo_pmp_fault_can_be_delegated_to_s);
     RUN_TEST(test_amo_reserved_encodings_are_illegal);
     RUN_TEST(test_amo_retires_and_a_faulting_amo_does_not);
+    RUN_TEST(test_lr_loads_the_word_and_registers_a_reservation);
+    RUN_TEST(test_lr_with_rd_x0_still_registers_a_reservation);
+    RUN_TEST(test_sc_after_lr_to_the_same_address_succeeds);
+    RUN_TEST(test_sc_without_a_reservation_fails);
+    RUN_TEST(test_sc_to_another_address_fails_and_clears_the_reservation);
+    RUN_TEST(test_a_successful_sc_uses_up_the_reservation);
+    RUN_TEST(test_a_later_lr_replaces_the_reservation);
+    RUN_TEST(test_lr_sc_aq_and_rl_are_ignored);
+    RUN_TEST(test_sc_rd_may_be_rs2);
+    RUN_TEST(test_lr_sc_misaligned_address_raises_address_misaligned);
+    RUN_TEST(test_lr_sc_outside_memory_is_an_access_fault);
+    RUN_TEST(test_lr_sc_pmp);
+    RUN_TEST(test_lr_with_nonzero_rs2_and_other_funct3_are_illegal);
+    RUN_TEST(test_a_faulting_lr_or_sc_keeps_the_reservation);
+    RUN_TEST(test_the_reservation_survives_a_trap_and_mret);
+    RUN_TEST(test_lr_sc_retire_and_a_faulting_one_does_not);
     RUN_TEST(test_csrr_misa_reports_the_implemented_extensions);
     RUN_TEST(test_csrr_tdata1_reads_zero);
     RUN_TEST(test_tdata1_write_does_not_read_back);
