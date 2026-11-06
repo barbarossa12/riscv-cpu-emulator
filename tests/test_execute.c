@@ -2971,6 +2971,123 @@ void test_lr_sc_retire_and_a_faulting_one_does_not(void) {
     mem_free(&mem);
 }
 
+/* ---- Instruction length ------------------------------------------------------------------- */
+
+/* Compressed instructions arrive in step 3 with length 2, so check now that every instruction
+ * (x1 = 1, x2 = 0x1000, x3 = 3 and the branches all not taken) advances the pc, and links, by the instruction's length rather than a fixed 4. */
+static void length_run(CPU *cpu, Memory *mem, uint32_t raw, uint8_t length) {
+    cpu_reset(cpu);
+    mem_init(mem, 0x4000);
+    cpu_write_csr(cpu, CSR_MCAUSE, 0x77);
+    cpu_write_reg(cpu, 1, 1);
+    cpu_write_reg(cpu, 2, 0x1000);
+    cpu_write_reg(cpu, 3, 3);
+    cpu->pc = 0x40;
+    DecodedInstruction instr = decode_instruction(raw);
+    instr.length = length;
+    execute(cpu, mem, &instr);
+}
+
+void test_every_kind_of_instruction_advances_by_its_length(void) {
+    const struct { const char *name; uint32_t raw; } v[] = {
+        {"ADDI", 0x00518213},
+        {"SLTI", 0x0051A213},
+        {"SLTIU", 0x0051B213},
+        {"XORI", 0x0051C213},
+        {"ORI", 0x0051E213},
+        {"ANDI", 0x0051F213},
+        {"SLLI", 0x00219213},
+        {"SRLI", 0x0011D213},
+        {"SRAI", 0x4011D213},
+        {"ADD", 0x00308233},
+        {"SUB", 0x40308233},
+        {"SLL", 0x00309233},
+        {"SLT", 0x0030A233},
+        {"SLTU", 0x0030B233},
+        {"XOR", 0x0030C233},
+        {"SRL", 0x0030D233},
+        {"SRA", 0x4030D233},
+        {"OR", 0x0030E233},
+        {"AND", 0x0030F233},
+        {"MUL", 0x02308233},
+        {"MULH", 0x02309233},
+        {"MULHSU", 0x0230A233},
+        {"MULHU", 0x0230B233},
+        {"DIV", 0x0230C233},
+        {"DIVU", 0x0230D233},
+        {"REM", 0x0230E233},
+        {"REMU", 0x0230F233},
+        {"LB", 0x00010203},
+        {"LH", 0x00011203},
+        {"LW", 0x00012203},
+        {"LBU", 0x00014203},
+        {"LHU", 0x00015203},
+        {"SB", 0x00310023},
+        {"SH", 0x00311023},
+        {"SW", 0x00312023},
+        {"BEQ not taken", 0x00208463},
+        {"BNE not taken", 0x00109463},
+        {"BLT not taken", 0x00114463},
+        {"BGE not taken", 0x0020D463},
+        {"BLTU not taken", 0x00116463},
+        {"BGEU not taken", 0x0020F463},
+        {"LUI", 0x000010B7},
+        {"AUIPC", 0x00001097},
+        {"FENCE", 0x0FF0000F},
+        {"FENCE.I", 0x0000100F},
+        {"CSRRW", 0x34019273},
+        {"CSRRS", 0x3401A273},
+        {"CSRRC", 0x3401B273},
+        {"CSRRWI", 0x3401D273},
+        {"CSRRSI", 0x3401E273},
+        {"CSRRCI", 0x3401F273},
+        {"WFI", 0x10500073},
+        {"SFENCE.VMA", 0x12000073},
+        {"AMOADD.W", 0x0031222F},
+        {"AMOSWAP.W", 0x0831222F},
+        {"LR.W", 0x1001222F},
+        {"SC.W", 0x1831222F},
+        {"AMOXOR.W", 0x2031222F},
+        {"AMOOR.W", 0x4031222F},
+        {"AMOAND.W", 0x6031222F},
+        {"AMOMIN.W", 0x8031222F},
+        {"AMOMAX.W", 0xA031222F},
+        {"AMOMINU.W", 0xC031222F},
+        {"AMOMAXU.W", 0xE031222F},
+    };
+    const uint8_t lengths[] = {2, 4};
+    for (unsigned i = 0; i < sizeof v / sizeof v[0]; i++) {
+        for (unsigned l = 0; l < 2; l++) {
+            CPU cpu; Memory mem;
+            length_run(&cpu, &mem, v[i].raw, lengths[l]);
+            TEST_ASSERT_EQUAL_HEX32_MESSAGE(0x77, cpu_read_csr(&cpu, CSR_MCAUSE), v[i].name);   /* no trap */
+            TEST_ASSERT_EQUAL_HEX32_MESSAGE(0x40 + lengths[l], cpu.pc, v[i].name);
+            mem_free(&mem);
+        }
+    }
+}
+
+void test_jal_and_jalr_link_the_address_after_the_instruction(void) {
+    CPU cpu; Memory mem;
+    length_run(&cpu, &mem, 0x008000EF, 2);                        /* JAL x1, +8 */
+    TEST_ASSERT_EQUAL_HEX32(0x42, cpu_read_reg(&cpu, 1));
+    TEST_ASSERT_EQUAL_HEX32(0x48, cpu.pc);
+    mem_free(&mem);
+
+    length_run(&cpu, &mem, 0x008000EF, 4);
+    TEST_ASSERT_EQUAL_HEX32(0x44, cpu_read_reg(&cpu, 1));
+    mem_free(&mem);
+
+    length_run(&cpu, &mem, 0x000100E7, 2);                        /* JALR x1, 0(x2) with x2 = 0x1000 */
+    TEST_ASSERT_EQUAL_HEX32(0x42, cpu_read_reg(&cpu, 1));
+    TEST_ASSERT_EQUAL_HEX32(0x1000, cpu.pc);
+    mem_free(&mem);
+
+    length_run(&cpu, &mem, 0x000100E7, 4);
+    TEST_ASSERT_EQUAL_HEX32(0x44, cpu_read_reg(&cpu, 1));
+    mem_free(&mem);
+}
+
 /* Read-only CSR addresses (csr[11:10] == 0b11), here 0xF14 (mhartid) */
 void test_csrrw_read_only_csr_traps(void) {
     assert_csr_access_illegal(0xF1409073, 0xF14, 7); // CSRRW x0, mhartid, x1
@@ -4015,6 +4132,8 @@ int main(void) {
     RUN_TEST(test_a_faulting_lr_or_sc_keeps_the_reservation);
     RUN_TEST(test_the_reservation_survives_a_trap_and_mret);
     RUN_TEST(test_lr_sc_retire_and_a_faulting_one_does_not);
+    RUN_TEST(test_every_kind_of_instruction_advances_by_its_length);
+    RUN_TEST(test_jal_and_jalr_link_the_address_after_the_instruction);
     RUN_TEST(test_csrr_misa_reports_the_implemented_extensions);
     RUN_TEST(test_csrr_tdata1_reads_zero);
     RUN_TEST(test_tdata1_write_does_not_read_back);
