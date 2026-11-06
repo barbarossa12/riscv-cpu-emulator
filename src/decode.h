@@ -12,7 +12,8 @@ typedef enum {
 } InstrFormat;
 
 typedef struct {
-    uint32_t raw; // the original 32-bit instruction word, kept for debugging / logging
+    uint32_t raw;    // the original instruction bits: 32 bits, or the 16-bit form of a compressed instruction
+    uint8_t length;  // instruction length in bytes: 4 (2 for a compressed instruction, from step 3)
 
     InstrFormat format;
 

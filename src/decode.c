@@ -71,6 +71,7 @@ DecodedInstruction decode_instruction(uint32_t raw) {
 
     // save the raw instruction
     ret.raw = raw;
+    ret.length = 4;
 
     // extract bit values
     ret.opcode = raw & 0x7F;
