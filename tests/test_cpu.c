@@ -51,7 +51,7 @@ void test_cpu_csr_write_read_roundtrip(void) {
 
 void test_cpu_csr_writes_are_independent(void) {
 	CPU test_cpu = {0};
-	cpu_write_csr(&test_cpu, CSR_MEPC, 0xAAA8);   // 4-aligned: mepc drops the low two bits
+	cpu_write_csr(&test_cpu, CSR_MEPC, 0xAAA8);   // 2-aligned: mepc only drops bit 0
 	cpu_write_csr(&test_cpu, CSR_MCAUSE, 0xBBBB);
 	TEST_ASSERT_EQUAL_UINT32(0xAAA8, cpu_read_csr(&test_cpu, CSR_MEPC));
 	TEST_ASSERT_EQUAL_UINT32(0xBBBB, cpu_read_csr(&test_cpu, CSR_MCAUSE));
@@ -188,15 +188,15 @@ void test_cpu_mstatus_mpp_reserved_write_still_applies_other_fields(void) {
 	TEST_ASSERT_EQUAL_UINT32(0x1808, cpu_read_csr(&c, CSR_MSTATUS)); // MIE set, MPP still M
 }
 
-void test_cpu_mepc_low_bits_are_zero(void) {
+void test_cpu_mepc_bit_zero_is_zero(void) {
 	CPU c; cpu_reset(&c);
 	const struct { uint32_t written, expected; } v[] = {
 		{0x80000000, 0x80000000},
 		{0x80000001, 0x80000000},
-		{0x80000002, 0x80000000},
-		{0x80000003, 0x80000000},
+		{0x80000002, 0x80000002},
+		{0x80000003, 0x80000002},
 		{0x80000004, 0x80000004},
-		{0xFFFFFFFF, 0xFFFFFFFC},
+		{0xFFFFFFFF, 0xFFFFFFFE},
 	};
 	for (unsigned i = 0; i < sizeof v / sizeof v[0]; i++) {
 		cpu_write_csr(&c, CSR_MEPC, v[i].written);
@@ -379,12 +379,13 @@ void test_cpu_sip_writes_touch_only_ssip(void) {
 	TEST_ASSERT_EQUAL_UINT32(0x220, cpu_read_csr(&c, CSR_MIP));
 }
 
-void test_cpu_stvec_and_sepc_drop_low_bits(void) {
+void test_cpu_stvec_drops_two_low_bits_and_sepc_drops_bit_zero(void) {
 	const struct { uint16_t csr; uint32_t written, expected; } v[] = {
 		{CSR_STVEC, 0x80000003, 0x80000000},
 		{CSR_STVEC, 0x00001001, 0x00001000},
-		{CSR_SEPC,  0x80000003, 0x80000000},
-		{CSR_SEPC,  0xFFFFFFFF, 0xFFFFFFFC},
+		{CSR_SEPC,  0x80000003, 0x80000002},
+		{CSR_SEPC,  0x80000001, 0x80000000},
+		{CSR_SEPC,  0xFFFFFFFF, 0xFFFFFFFE},
 	};
 	for (unsigned i = 0; i < sizeof v / sizeof v[0]; i++) {
 		CPU c; cpu_reset(&c);
@@ -644,7 +645,7 @@ int main(void) {
 	RUN_TEST(test_cpu_sie_and_sip_show_only_delegated_interrupts);
 	RUN_TEST(test_cpu_sie_writes_touch_only_delegated_bits);
 	RUN_TEST(test_cpu_sip_writes_touch_only_ssip);
-	RUN_TEST(test_cpu_stvec_and_sepc_drop_low_bits);
+	RUN_TEST(test_cpu_stvec_drops_two_low_bits_and_sepc_drops_bit_zero);
 	RUN_TEST(test_cpu_plain_s_registers_round_trip);
 	RUN_TEST(test_cpu_s_registers_are_independent_of_the_m_registers);
 	RUN_TEST(test_cpu_satp_is_read_only_zero);
@@ -670,7 +671,7 @@ int main(void) {
 	RUN_TEST(test_cpu_mstatus_mpp_accepts_u_s_and_m);
 	RUN_TEST(test_cpu_mstatus_mpp_reserved_write_keeps_old);
 	RUN_TEST(test_cpu_mstatus_mpp_reserved_write_still_applies_other_fields);
-	RUN_TEST(test_cpu_mepc_low_bits_are_zero);
+	RUN_TEST(test_cpu_mepc_bit_zero_is_zero);
 	RUN_TEST(test_cpu_counter_halves_round_trip);
 	RUN_TEST(test_cpu_counter_half_writes_keep_the_other_half);
 	RUN_TEST(test_cpu_counter_shadows_read_the_machine_counters);

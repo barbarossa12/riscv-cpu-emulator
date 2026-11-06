@@ -165,7 +165,7 @@ void cpu_write_csr(CPU *cpu, uint16_t addr, uint32_t value) {
 			return;
 		case CSR_MEPC:
 		case CSR_SEPC:
-			value &= ~0x3u; // IALIGN=32: the low two bits are always 0
+			value &= ~0x1u; // IALIGN=16: only bit 0 is always 0
 			break;
 		case CSR_MTVEC:
 		case CSR_STVEC:
