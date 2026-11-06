@@ -23,6 +23,7 @@ add_library(riscv_core
     src/log.c
     src/pmp.c
     src/decode.c
+    src/compressed.c
     src/execute.c
     src/elf.c
 )
