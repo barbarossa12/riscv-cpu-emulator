@@ -142,6 +142,12 @@ DecodedInstruction decode_instruction(uint32_t raw) {
             ret.format = FMT_UNKNOWN;
 	        ret.imm = get_immediate(ret.format, raw);
         break;
+    case 0x2F:
+            // R type
+            // AMOSWAP.W, AMOADD.W, ... (LR.W and SC.W share the opcode)
+            ret.format = FMT_R;
+	        ret.imm = get_immediate(ret.format, raw);
+        break;
     case 0x73:
             // I type
             // ECALL, EBREAK and CSR instructions.
