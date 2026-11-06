@@ -31,6 +31,7 @@ if(RISCV_TESTS)
     set(RV32UM_TESTS div divu mul mulh mulhsu mulhu rem remu)
     set(RV32UA_TESTS
         amoadd_w amoand_w amomax_w amomaxu_w amomin_w amominu_w amoor_w amoswap_w amoxor_w lrsc)
+    set(RV32UC_TESTS rvc)
     set(RV32MI_TESTS
         breakpoint csr mcsr illegal ma_fetch ma_addr scall sbreak shamt
         lw-misaligned lh-misaligned sh-misaligned sw-misaligned
@@ -51,6 +52,9 @@ if(RISCV_TESTS)
     endforeach()
     foreach(t ${RV32UA_TESTS})
         list(APPEND _names rv32ua-p-${t})
+    endforeach()
+    foreach(t ${RV32UC_TESTS})
+        list(APPEND _names rv32uc-p-${t})
     endforeach()
     foreach(t ${RV32MI_TESTS})
         list(APPEND _names rv32mi-p-${t})
