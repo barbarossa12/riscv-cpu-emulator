@@ -75,15 +75,17 @@ void test_cpu_other_csrs_keep_low_bits(void) {
 
 void test_cpu_misa_reports_the_implemented_extensions(void) {
 	CPU test_cpu = {0};
-	TEST_ASSERT_EQUAL_UINT32(0x40141101, cpu_read_csr(&test_cpu, CSR_MISA)); // MXL=1, A, I, M, S, U
+	TEST_ASSERT_EQUAL_UINT32(0x40141105, cpu_read_csr(&test_cpu, CSR_MISA)); // MXL=1, A, C, I, M, S, U
 }
 
 void test_cpu_misa_writes_are_ignored(void) {
 	CPU test_cpu = {0};
 	cpu_write_csr(&test_cpu, CSR_MISA, 0xFFFFFFFF); // tries to enable C, F, ...
-	TEST_ASSERT_EQUAL_UINT32(0x40141101, cpu_read_csr(&test_cpu, CSR_MISA));
+	TEST_ASSERT_EQUAL_UINT32(0x40141105, cpu_read_csr(&test_cpu, CSR_MISA));
 	cpu_write_csr(&test_cpu, CSR_MISA, 0);
-	TEST_ASSERT_EQUAL_UINT32(0x40141101, cpu_read_csr(&test_cpu, CSR_MISA));
+	TEST_ASSERT_EQUAL_UINT32(0x40141105, cpu_read_csr(&test_cpu, CSR_MISA));
+	cpu_write_csr(&test_cpu, CSR_MISA, 0x40141101); // tries to switch C off: IALIGN stays 16
+	TEST_ASSERT_EQUAL_UINT32(0x40141105, cpu_read_csr(&test_cpu, CSR_MISA));
 }
 
 void test_cpu_counteren_reads_zero_after_reset(void) {
