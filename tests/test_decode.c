@@ -93,6 +93,22 @@ void test_opcode_alu_reg(void) {
 	TEST_ASSERT_EQUAL_INT(FMT_R, test_instruction.format);
 }
 
+void test_opcode_amo(void) {
+	DecodedInstruction test_instruction = decode_instruction(0x2F);
+	TEST_ASSERT_EQUAL_INT(FMT_R, test_instruction.format);
+	TEST_ASSERT_EQUAL_INT(0, test_instruction.imm);
+}
+
+void test_amo_fields(void) {
+	DecodedInstruction d = decode_instruction(0xE03120AF);   // AMOMAXU.W x1, x3, (x2)
+	TEST_ASSERT_EQUAL_UINT8(0x2F, d.opcode);
+	TEST_ASSERT_EQUAL_UINT8(1, d.rd);
+	TEST_ASSERT_EQUAL_UINT8(2, d.rs1);
+	TEST_ASSERT_EQUAL_UINT8(3, d.rs2);
+	TEST_ASSERT_EQUAL_UINT8(2, d.funct3);
+	TEST_ASSERT_EQUAL_UINT8(0x70, d.funct7);                  // funct5 0x1C, aq 0, rl 0
+}
+
 void test_opcode_fence(void) {
 	uint32_t raw = (0xFFFFFFFF & ~0x7F) | 0x0F;
 	DecodedInstruction test_instruction = decode_instruction(raw);
@@ -202,6 +218,8 @@ int main(void) {
 	RUN_TEST(test_opcode_alu_imm);
 	RUN_TEST(test_opcode_alu_reg);
 	RUN_TEST(test_opcode_fence);
+	RUN_TEST(test_opcode_amo);
+	RUN_TEST(test_amo_fields);
 	RUN_TEST(test_opcode_system);
 	RUN_TEST(test_opcode_unmapped);
 	RUN_TEST(test_i_type_immediate_zero);
