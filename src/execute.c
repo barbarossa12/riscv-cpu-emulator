@@ -1,6 +1,7 @@
 #include "execute.h"
 #include "log.h"
 #include "pmp.h"
+#include "compressed.h"
 
 static uint32_t execute_op_imm(CPU *cpu, Memory *mem, DecodedInstruction *instr, uint32_t pc);
 static uint32_t execute_op(CPU *cpu, Memory *mem, DecodedInstruction *instr, uint32_t pc);
@@ -836,18 +837,39 @@ void execute(CPU *cpu, Memory *mem, DecodedInstruction *instr) {
     }
 }
 
+// One 2-byte instruction fetch, PMP-checked and bounds-checked on its own.
+static bool fetch_halfword(CPU *cpu, Memory *mem, uint32_t addr, uint16_t *out) {
+    return pmp_check(cpu, addr, 2, PMP_ACCESS_EXEC, cpu->privilege_mode) &&
+           mem_try_read16(mem, addr, out);
+}
+
 void cpu_step(CPU *cpu, Memory *mem) {
     cpu->trapped = false;
     cpu->mcycle_written = false;
     cpu->minstret_written = false;
 
-    uint32_t raw;
-    if (!pmp_check(cpu, cpu->pc, 4, PMP_ACCESS_EXEC, cpu->privilege_mode) ||
-        !mem_try_read32(mem, cpu->pc, &raw)) {
-        cpu->pc = trap_enter(cpu, cpu->pc, 1, cpu->pc); // instruction access fault
-    } else {
-        DecodedInstruction instr = decode_instruction(raw);
-        execute(cpu, mem, &instr);
+    uint32_t pc = cpu->pc;
+    uint16_t low;
+    if (!fetch_halfword(cpu, mem, pc, &low)) {
+        cpu->pc = trap_enter(cpu, pc, 1, pc); // instruction access fault
+    } else if ((low & 0x3u) == 0x3u) {        // bits [1:0] = 11: a 32-bit instruction
+        uint16_t high;
+        if (!fetch_halfword(cpu, mem, pc + 2, &high)) {
+            cpu->pc = trap_enter(cpu, pc, 1, pc + 2); // mtval is the part that faulted; mepc stays at the start
+        } else {
+            DecodedInstruction instr = decode_instruction((uint32_t)high << 16 | low);
+            execute(cpu, mem, &instr);
+        }
+    } else {                                  // a compressed instruction
+        uint32_t word;
+        if (!expand_compressed(low, &word)) {
+            cpu->pc = trap_enter(cpu, pc, 2, low); // illegal instruction; mtval is its 16 bits
+        } else {
+            DecodedInstruction instr = decode_instruction(word);
+            instr.raw = low;                  // what an illegal-instruction trap reports
+            instr.length = 2;
+            execute(cpu, mem, &instr);
+        }
     }
 
     // One cycle per step. An instruction that traps (this includes ECALL and

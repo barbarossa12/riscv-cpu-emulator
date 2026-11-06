@@ -1654,12 +1654,12 @@ void test_csrrc_sstatus_clears_only_s_bits(void) {
     TEST_ASSERT_EQUAL_UINT32(0x1888, cpu_read_csr(&cpu, CSR_MSTATUS)); // MIE, MPIE, MPP kept
 }
 
-void test_csrrw_sepc_drops_low_bits(void) {
+void test_csrrw_sepc_drops_bit_zero(void) {
     CPU cpu; test_cpu_reset_in_mode(&cpu, PRV_S);
     cpu_write_reg(&cpu, 1, 0x80000003);
     run_on(&cpu, 0x14109073);                           // CSRRW x0, sepc, x1
     run_on(&cpu, 0x14102173);                           // CSRRS x2, sepc, x0
-    TEST_ASSERT_EQUAL_UINT32(0x80000000, cpu_read_reg(&cpu, 2));
+    TEST_ASSERT_EQUAL_UINT32(0x80000002, cpu_read_reg(&cpu, 2));
 }
 
 /* ---- Trap delegation --------------------------------------------------------------------- */
@@ -1852,12 +1852,12 @@ void test_sret_table(void) {
     }
 }
 
-void test_sret_returns_to_sepc_without_its_low_bits(void) {
+void test_sret_returns_to_sepc_without_its_bit_zero(void) {
     CPU cpu; test_cpu_reset_in_mode(&cpu, PRV_S);
     cpu_write_csr(&cpu, CSR_MSTATUS, 0x120);
     cpu_write_csr(&cpu, CSR_SEPC, 0x43);
     run_trap_case(&cpu, SRET_WORD);
-    TEST_ASSERT_EQUAL_UINT32(0x40, cpu.pc);
+    TEST_ASSERT_EQUAL_UINT32(0x42, cpu.pc);
 }
 
 void test_sret_leaves_the_m_registers_alone(void) {
@@ -3088,6 +3088,150 @@ void test_jal_and_jalr_link_the_address_after_the_instruction(void) {
     mem_free(&mem);
 }
 
+/* ---- Compressed instructions through cpu_step ---------------------------------------------- */
+
+/* Encodings from riscv64-unknown-elf-as (-march=rv32imac). */
+#define C_NOP        0x0001u
+#define C_LI_A0_3    0x450Du   /* c.li x10, 3 */
+#define C_ADDI_A0_5  0x0515u   /* c.addi x10, 5 */
+#define C_ADD_A0_A1  0x952Eu   /* c.add x10, x11 */
+#define C_JAL_8      0x2021u   /* c.jal .+8 */
+#define C_JALR_T0    0x9282u   /* c.jalr x5 */
+#define C_EBREAK     0x9002u
+#define ADDI_A1_A0_4 0x00450593u /* addi x11, x10, 4 */
+
+void test_cpu_step_executes_a_compressed_instruction(void) {
+    CPU cpu; Memory mem;
+    pmp_rig(&cpu, &mem, PRV_M);
+    mem_write16(&mem, 0, C_ADDI_A0_5);
+    cpu.pc = 0;
+    cpu_step(&cpu, &mem);
+    TEST_ASSERT_EQUAL_UINT32(5, cpu_read_reg(&cpu, 10));
+    TEST_ASSERT_EQUAL_UINT32(2, cpu.pc);
+    TEST_ASSERT_EQUAL_UINT64(1, cpu.minstret);
+    TEST_ASSERT_EQUAL_UINT32(0x77, cpu_read_csr(&cpu, CSR_MCAUSE));
+    mem_free(&mem);
+}
+
+void test_cpu_step_runs_mixed_16_and_32_bit_instructions(void) {
+    CPU cpu; Memory mem;
+    pmp_rig(&cpu, &mem, PRV_M);
+    mem_write16(&mem, 0, C_LI_A0_3);          /* x10 = 3 */
+    mem_write32(&mem, 2, ADDI_A1_A0_4);       /* x11 = 7: a 32-bit instruction at a 2-aligned address */
+    mem_write16(&mem, 6, C_ADD_A0_A1);        /* x10 = 10 */
+    cpu.pc = 0;
+    cpu_step(&cpu, &mem);
+    TEST_ASSERT_EQUAL_UINT32(2, cpu.pc);
+    cpu_step(&cpu, &mem);
+    TEST_ASSERT_EQUAL_UINT32(6, cpu.pc);
+    cpu_step(&cpu, &mem);
+    TEST_ASSERT_EQUAL_UINT32(8, cpu.pc);
+    TEST_ASSERT_EQUAL_UINT32(10, cpu_read_reg(&cpu, 10));
+    TEST_ASSERT_EQUAL_UINT32(7, cpu_read_reg(&cpu, 11));
+    TEST_ASSERT_EQUAL_UINT64(3, cpu.minstret);
+    TEST_ASSERT_EQUAL_UINT32(0x77, cpu_read_csr(&cpu, CSR_MCAUSE));
+    mem_free(&mem);
+}
+
+void test_cpu_step_fetches_a_32_bit_instruction_across_a_4k_boundary(void) {
+    CPU cpu; Memory mem;
+    pmp_rig(&cpu, &mem, PRV_M);
+    mem_free(&mem);
+    mem_init(&mem, 0x2000);
+    cpu_write_csr(&cpu, CSR_MCAUSE, 0x77);
+    mem_write32(&mem, 0xFFE, ADDI_X6_7);
+    cpu.pc = 0xFFE;
+    cpu_step(&cpu, &mem);
+    TEST_ASSERT_EQUAL_UINT32(7, cpu_read_reg(&cpu, 6));
+    TEST_ASSERT_EQUAL_UINT32(0x1002, cpu.pc);
+    TEST_ASSERT_EQUAL_UINT32(0x77, cpu_read_csr(&cpu, CSR_MCAUSE));
+    mem_free(&mem);
+}
+
+void test_c_jal_and_c_jalr_link_pc_plus_2(void) {
+    CPU cpu; Memory mem;
+    pmp_rig(&cpu, &mem, PRV_M);
+    mem_write16(&mem, 0x100, C_JAL_8);
+    cpu.pc = 0x100;
+    cpu_step(&cpu, &mem);
+    TEST_ASSERT_EQUAL_UINT32(0x102, cpu_read_reg(&cpu, 1));
+    TEST_ASSERT_EQUAL_UINT32(0x108, cpu.pc);
+    mem_free(&mem);
+
+    pmp_rig(&cpu, &mem, PRV_M);
+    mem_write16(&mem, 0x100, C_JALR_T0);
+    cpu_write_reg(&cpu, 5, 0x200);
+    cpu.pc = 0x100;
+    cpu_step(&cpu, &mem);
+    TEST_ASSERT_EQUAL_UINT32(0x102, cpu_read_reg(&cpu, 1));
+    TEST_ASSERT_EQUAL_UINT32(0x200, cpu.pc);
+    mem_free(&mem);
+}
+
+void test_c_ebreak_traps_with_mepc_at_a_2_aligned_pc(void) {
+    CPU cpu; Memory mem;
+    pmp_rig(&cpu, &mem, PRV_M);
+    mem_write16(&mem, 0x102, C_EBREAK);
+    cpu.pc = 0x102;
+    cpu_step(&cpu, &mem);
+    pmp_assert_fault(&cpu, 3, 0, 0x102, PRV_M, "c.ebreak");
+    TEST_ASSERT_EQUAL_UINT64(0, cpu.minstret);
+    mem_free(&mem);
+}
+
+void test_illegal_compressed_instruction_reports_its_16_bits(void) {
+    const struct { const char *name; uint16_t half; uint32_t pc; } v[] = {
+        {"all zero",            0x0000, 0x100},
+        {"C.ADDI16SP, nzimm 0", 0x6101, 0x102},
+        {"C.FLD (no D)",        0x2000, 0x106},
+        {"C.SLLI, shamt 32",    0x1502, 0x1FE},
+    };
+    for (unsigned i = 0; i < sizeof v / sizeof v[0]; i++) {
+        CPU cpu; Memory mem;
+        pmp_rig(&cpu, &mem, PRV_M);
+        mem_write16(&mem, v[i].pc, v[i].half);
+        cpu_write_reg(&cpu, 1, 0x11111111);
+        cpu.pc = v[i].pc;
+        cpu_step(&cpu, &mem);
+        pmp_assert_fault(&cpu, 2, v[i].half, v[i].pc, PRV_M, v[i].name);
+        TEST_ASSERT_EQUAL_HEX32_MESSAGE(0x11111111, cpu_read_reg(&cpu, 1), v[i].name);
+        TEST_ASSERT_EQUAL_UINT64_MESSAGE(0, cpu.minstret, v[i].name);
+        mem_free(&mem);
+    }
+}
+
+/* PMP checks each 2-byte fetch on its own. Region: X only, [0x1000, 0x2000), in U-mode. */
+void test_pmp_fetch_is_checked_per_halfword(void) {
+    const struct { const char *name; uint32_t pc; uint32_t raw; uint32_t tval; bool ok; uint32_t next_pc; } v[] = {
+        {"32-bit, inside",                    0x1002, ADDI_X6_7,    0,      true,  0x1006},
+        {"32-bit, second half outside",       0x1FFE, ADDI_X6_7,    0x2000, false, 0},
+        {"32-bit, first half outside",        0x0FFE, ADDI_X6_7,    0x0FFE, false, 0},
+        {"compressed, last halfword inside",  0x1FFE, C_LI_A0_3,    0,      true,  0x2000},
+        {"compressed, just outside",          0x2000, C_LI_A0_3,    0x2000, false, 0},
+    };
+    for (unsigned i = 0; i < sizeof v / sizeof v[0]; i++) {
+        CPU cpu; Memory mem;
+        pmp_rig(&cpu, &mem, PRV_U);
+        pmp_data_region(&cpu, 0, 0x1C);
+        if (v[i].raw > 0xFFFF) {
+            mem_write32(&mem, v[i].pc, v[i].raw);
+        } else {
+            mem_write16(&mem, v[i].pc, (uint16_t)v[i].raw);
+        }
+        cpu.pc = v[i].pc;
+        cpu_step(&cpu, &mem);
+        if (v[i].ok) {
+            TEST_ASSERT_EQUAL_UINT32_MESSAGE(v[i].next_pc, cpu.pc, v[i].name);
+            TEST_ASSERT_EQUAL_UINT32_MESSAGE(0x77, cpu_read_csr(&cpu, CSR_MCAUSE), v[i].name);
+            TEST_ASSERT_EQUAL_UINT64_MESSAGE(1, cpu.minstret, v[i].name);
+        } else {
+            pmp_assert_fault(&cpu, 1, v[i].tval, v[i].pc, PRV_U, v[i].name);
+            TEST_ASSERT_EQUAL_UINT64_MESSAGE(0, cpu.minstret, v[i].name);
+        }
+        mem_free(&mem);
+    }
+}
+
 /* Read-only CSR addresses (csr[11:10] == 0b11), here 0xF14 (mhartid) */
 void test_csrrw_read_only_csr_traps(void) {
     assert_csr_access_illegal(0xF1409073, 0xF14, 7); // CSRRW x0, mhartid, x1
@@ -3273,7 +3417,7 @@ void test_tdata1_write_does_not_read_back(void) {
 
 /* cpu_step: fetch + decode + execute. A fetch outside memory is an instruction access fault
  * (cause 1, mtval = the faulting pc), not an abort. */
-static void assert_fetch_fault(Memory *mem, uint32_t start_pc) {
+static void assert_fetch_fault_with_tval(Memory *mem, uint32_t start_pc, uint32_t tval) {
     CPU cpu; cpu_reset(&cpu);
     cpu_write_csr(&cpu, CSR_MTVEC, 0x1000);
     cpu_write_reg(&cpu, 1, 0xDEADBEEF);
@@ -3282,10 +3426,15 @@ static void assert_fetch_fault(Memory *mem, uint32_t start_pc) {
     cpu_step(&cpu, mem);
 
     TEST_ASSERT_EQUAL_UINT32(0x1000, cpu.pc);
-    TEST_ASSERT_EQUAL_UINT32(start_pc, cpu_read_csr(&cpu, CSR_MEPC));
+    TEST_ASSERT_EQUAL_UINT32(start_pc, cpu_read_csr(&cpu, CSR_MEPC));       /* the start of the instruction */
     TEST_ASSERT_EQUAL_UINT32(1, cpu_read_csr(&cpu, CSR_MCAUSE));
-    TEST_ASSERT_EQUAL_UINT32(start_pc, cpu_read_csr(&cpu, CSR_MTVAL));
+    TEST_ASSERT_EQUAL_UINT32(tval, cpu_read_csr(&cpu, CSR_MTVAL));          /* the part that faulted */
     TEST_ASSERT_EQUAL_UINT32(0xDEADBEEF, cpu_read_reg(&cpu, 1));
+    TEST_ASSERT_EQUAL_UINT64(0, cpu.minstret);
+}
+
+static void assert_fetch_fault(Memory *mem, uint32_t start_pc) {
+    assert_fetch_fault_with_tval(mem, start_pc, start_pc);
 }
 
 void test_cpu_step_executes_fetched_instruction(void) {
@@ -3362,10 +3511,29 @@ void test_cpu_step_fetch_at_size_faults(void) {
     mem_free(&mem);
 }
 
-void test_cpu_step_fetch_straddling_end_faults(void) {
+void test_cpu_step_fetch_second_half_past_the_end_faults(void) {
     Memory mem;
-    mem_init(&mem, 14);                // size not a multiple of 4: the word at 12 straddles the end
-    assert_fetch_fault(&mem, 12);      // pc must be 4-aligned, since mepc drops the low two bits
+    mem_init(&mem, 14);                // the 32-bit instruction at 12 has its second half at 14, past the end
+    mem_write16(&mem, 12, 0x0013);     // bits [1:0] = 11: a 32-bit instruction
+    assert_fetch_fault_with_tval(&mem, 12, 14);   // mepc = the start, mtval = the half that faulted
+    mem_free(&mem);
+
+    mem_init(&mem, 16);
+    mem_write16(&mem, 14, 0x0013);     // at a 2-aligned pc: the second half is at 16
+    assert_fetch_fault_with_tval(&mem, 14, 16);
+    mem_free(&mem);
+}
+
+void test_cpu_step_compressed_instruction_fits_in_the_last_halfword(void) {
+    CPU cpu; cpu_reset(&cpu);
+    Memory mem;
+    mem_init(&mem, 14);
+    cpu_write_csr(&cpu, CSR_MCAUSE, 0x77);
+    mem_write16(&mem, 12, 0x0001);     // C.NOP
+    cpu.pc = 12;
+    cpu_step(&cpu, &mem);
+    TEST_ASSERT_EQUAL_UINT32(14, cpu.pc);
+    TEST_ASSERT_EQUAL_UINT32(0x77, cpu_read_csr(&cpu, CSR_MCAUSE));
     mem_free(&mem);
 }
 
@@ -4067,7 +4235,7 @@ int main(void) {
     RUN_TEST(test_satp_access_does_not_trap_and_stays_zero);
     RUN_TEST(test_csrrs_sstatus_sets_sie_in_mstatus);
     RUN_TEST(test_csrrc_sstatus_clears_only_s_bits);
-    RUN_TEST(test_csrrw_sepc_drops_low_bits);
+    RUN_TEST(test_csrrw_sepc_drops_bit_zero);
     RUN_TEST(test_trap_routing);
     RUN_TEST(test_delegated_trap_writes_s_state_and_leaves_m_state);
     RUN_TEST(test_delegated_trap_spp_and_interrupt_enable_stack);
@@ -4075,7 +4243,7 @@ int main(void) {
     RUN_TEST(test_delegated_trap_does_not_retire);
     RUN_TEST(test_delegation_csrs_through_instructions);
     RUN_TEST(test_sret_table);
-    RUN_TEST(test_sret_returns_to_sepc_without_its_low_bits);
+    RUN_TEST(test_sret_returns_to_sepc_without_its_bit_zero);
     RUN_TEST(test_sret_leaves_the_m_registers_alone);
     RUN_TEST(test_sret_retires);
     RUN_TEST(test_wfi_by_mode_and_tw);
@@ -4134,6 +4302,13 @@ int main(void) {
     RUN_TEST(test_lr_sc_retire_and_a_faulting_one_does_not);
     RUN_TEST(test_every_kind_of_instruction_advances_by_its_length);
     RUN_TEST(test_jal_and_jalr_link_the_address_after_the_instruction);
+    RUN_TEST(test_cpu_step_executes_a_compressed_instruction);
+    RUN_TEST(test_cpu_step_runs_mixed_16_and_32_bit_instructions);
+    RUN_TEST(test_cpu_step_fetches_a_32_bit_instruction_across_a_4k_boundary);
+    RUN_TEST(test_c_jal_and_c_jalr_link_pc_plus_2);
+    RUN_TEST(test_c_ebreak_traps_with_mepc_at_a_2_aligned_pc);
+    RUN_TEST(test_illegal_compressed_instruction_reports_its_16_bits);
+    RUN_TEST(test_pmp_fetch_is_checked_per_halfword);
     RUN_TEST(test_csrr_misa_reports_the_implemented_extensions);
     RUN_TEST(test_csrr_tdata1_reads_zero);
     RUN_TEST(test_tdata1_write_does_not_read_back);
@@ -4143,7 +4318,8 @@ int main(void) {
     RUN_TEST(test_cpu_step_based_memory_fetch_works);
     RUN_TEST(test_cpu_step_fetch_past_end_faults);
     RUN_TEST(test_cpu_step_fetch_at_size_faults);
-    RUN_TEST(test_cpu_step_fetch_straddling_end_faults);
+    RUN_TEST(test_cpu_step_fetch_second_half_past_the_end_faults);
+    RUN_TEST(test_cpu_step_compressed_instruction_fits_in_the_last_halfword);
     RUN_TEST(test_cpu_step_fetch_below_base_faults);
     RUN_TEST(test_cpu_step_fetch_at_zero_with_based_memory_faults);
     RUN_TEST(test_cpu_step_fetch_at_top_of_address_space_faults);
