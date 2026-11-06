@@ -93,6 +93,16 @@ void test_opcode_alu_reg(void) {
 	TEST_ASSERT_EQUAL_INT(FMT_R, test_instruction.format);
 }
 
+void test_decode_length_is_four(void) {
+	TEST_ASSERT_EQUAL_UINT8(4, decode_instruction(0x003100B3).length);   // ADD
+	TEST_ASSERT_EQUAL_UINT8(4, decode_instruction(0x00500093).length);   // ADDI
+	TEST_ASSERT_EQUAL_UINT8(4, decode_instruction(0xFFFFFFFF).length);   // unknown opcode
+}
+
+void test_decode_keeps_the_raw_bits(void) {
+	TEST_ASSERT_EQUAL_HEX32(0x003100B3, decode_instruction(0x003100B3).raw);
+}
+
 void test_opcode_amo(void) {
 	DecodedInstruction test_instruction = decode_instruction(0x2F);
 	TEST_ASSERT_EQUAL_INT(FMT_R, test_instruction.format);
@@ -218,6 +228,8 @@ int main(void) {
 	RUN_TEST(test_opcode_alu_imm);
 	RUN_TEST(test_opcode_alu_reg);
 	RUN_TEST(test_opcode_fence);
+	RUN_TEST(test_decode_length_is_four);
+	RUN_TEST(test_decode_keeps_the_raw_bits);
 	RUN_TEST(test_opcode_amo);
 	RUN_TEST(test_amo_fields);
 	RUN_TEST(test_opcode_system);
