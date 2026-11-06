@@ -1283,15 +1283,15 @@ void test_illegal_srli_unknown_funct7(void) {
     assert_illegal_instruction(0x0220D193); // SRLI x3, x1, 2 with funct7=0x01
 }
 
-/* IALIGN=32: a taken jump/branch to a target that isn't 4-byte aligned traps with
- * cause 0, mtval = the target, mepc = the jump itself, and rd is not written. */
-static void assert_misaligned_jump_trap(uint32_t encoding, uint32_t x1, uint32_t x2, uint32_t expected_target) {
+/* IALIGN=16: every jump and branch offset is even and JALR clears bit 0, so a target is always
+ * aligned and there is no instruction-address-misaligned exception. */
+static void assert_jump_to_2_aligned_target(uint32_t encoding, uint32_t x1, uint32_t x2, uint32_t expected_pc,
+                                            uint32_t expected_x1) {
     CPU cpu; cpu_reset(&cpu);
     Memory mem;
     mem_init(&mem, 16);
 
-    cpu_write_csr(&cpu, CSR_MTVEC, 0x1000);
-    cpu_write_csr(&cpu, CSR_MCAUSE, 0x77); // marker: cause 0 must be written by the trap
+    cpu_write_csr(&cpu, CSR_MCAUSE, 0x77); // marker: no trap must overwrite it
     cpu_write_reg(&cpu, 1, x1);
     cpu_write_reg(&cpu, 2, x2);
     mem_write32(&mem, 0, encoding);
@@ -1300,25 +1300,23 @@ static void assert_misaligned_jump_trap(uint32_t encoding, uint32_t x1, uint32_t
     DecodedInstruction instr = decode_instruction(raw);
     execute(&cpu, &mem, &instr);
 
-    TEST_ASSERT_EQUAL_UINT32(0x1000, cpu.pc);
-    TEST_ASSERT_EQUAL_UINT32(0, cpu_read_csr(&cpu, CSR_MCAUSE));
-    TEST_ASSERT_EQUAL_UINT32(expected_target, cpu_read_csr(&cpu, CSR_MTVAL));
-    TEST_ASSERT_EQUAL_UINT32(0, cpu_read_csr(&cpu, CSR_MEPC));
-    TEST_ASSERT_EQUAL_UINT32(x1, cpu_read_reg(&cpu, 1)); // return address / x1 untouched
+    TEST_ASSERT_EQUAL_UINT32(expected_pc, cpu.pc);
+    TEST_ASSERT_EQUAL_UINT32(expected_x1, cpu_read_reg(&cpu, 1));
+    TEST_ASSERT_EQUAL_UINT32(0x77, cpu_read_csr(&cpu, CSR_MCAUSE));
     mem_free(&mem);
 }
 
-void test_jal_misaligned_target(void) {
-    assert_misaligned_jump_trap(0x002000EF, 0xDEADBEEF, 0, 2); // JAL x1, +2
+void test_jal_to_a_2_aligned_target(void) {
+    assert_jump_to_2_aligned_target(0x002000EF, 0xDEADBEEF, 0, 2, 4); // JAL x1, +2
 }
 
-void test_jalr_misaligned_target(void) {
-    assert_misaligned_jump_trap(0x002100E7, 0xDEADBEEF, 0x100, 0x102); // JALR x1, 2(x2)
+void test_jalr_to_a_2_aligned_target(void) {
+    assert_jump_to_2_aligned_target(0x002100E7, 0xDEADBEEF, 0x100, 0x102, 4); // JALR x1, 2(x2)
 }
 
-void test_jalr_misaligned_target_after_clearing_bit0(void) {
-    // 0x100 + 3 = 0x103, bit 0 is cleared to 0x102, which is still misaligned
-    assert_misaligned_jump_trap(0x003100E7, 0xDEADBEEF, 0x100, 0x102); // JALR x1, 3(x2)
+void test_jalr_to_a_2_aligned_target_after_clearing_bit0(void) {
+    // 0x100 + 3 = 0x103, bit 0 is cleared to 0x102
+    assert_jump_to_2_aligned_target(0x003100E7, 0xDEADBEEF, 0x100, 0x102, 4); // JALR x1, 3(x2)
 }
 
 void test_jalr_ignores_target_bit0(void) {
@@ -1340,31 +1338,32 @@ void test_jalr_ignores_target_bit0(void) {
     mem_free(&mem);
 }
 
-void test_beq_misaligned_target(void) {
-    assert_misaligned_jump_trap(0x00208163, 5, 5, 2); // BEQ x1, x2, +2, taken
+void test_taken_branches_to_a_2_aligned_target(void) {
+    const struct { const char *name; uint32_t raw, x1, x2; } v[] = {
+        {"BEQ",  0x00208163, 5, 5},   /* BEQ x1, x2, +2 */
+        {"BNE",  0x00209163, 5, 6},
+        {"BLT",  0x0020C163, 1, 2},
+        {"BGE",  0x0020D163, 2, 1},
+        {"BLTU", 0x0020E163, 1, 2},
+        {"BGEU", 0x0020F163, 2, 1},
+    };
+    for (unsigned i = 0; i < sizeof v / sizeof v[0]; i++) {
+        CPU cpu; cpu_reset(&cpu);
+        Memory mem;
+        mem_init(&mem, 16);
+        cpu_write_csr(&cpu, CSR_MCAUSE, 0x77);
+        cpu_write_reg(&cpu, 1, v[i].x1);
+        cpu_write_reg(&cpu, 2, v[i].x2);
+        mem_write32(&mem, 0, v[i].raw);
+        DecodedInstruction instr = decode_instruction(v[i].raw);
+        execute(&cpu, &mem, &instr);
+        TEST_ASSERT_EQUAL_UINT32_MESSAGE(2, cpu.pc, v[i].name);
+        TEST_ASSERT_EQUAL_UINT32_MESSAGE(0x77, cpu_read_csr(&cpu, CSR_MCAUSE), v[i].name);
+        mem_free(&mem);
+    }
 }
 
-void test_bne_misaligned_target(void) {
-    assert_misaligned_jump_trap(0x00209163, 5, 6, 2); // BNE x1, x2, +2, taken
-}
-
-void test_blt_misaligned_target(void) {
-    assert_misaligned_jump_trap(0x0020C163, 1, 2, 2); // BLT x1, x2, +2, taken
-}
-
-void test_bge_misaligned_target(void) {
-    assert_misaligned_jump_trap(0x0020D163, 2, 1, 2); // BGE x1, x2, +2, taken
-}
-
-void test_bltu_misaligned_target(void) {
-    assert_misaligned_jump_trap(0x0020E163, 1, 2, 2); // BLTU x1, x2, +2, taken
-}
-
-void test_bgeu_misaligned_target(void) {
-    assert_misaligned_jump_trap(0x0020F163, 2, 1, 2); // BGEU x1, x2, +2, taken
-}
-
-void test_branch_not_taken_misaligned_target_no_trap(void) {
+void test_branch_not_taken_to_a_2_aligned_target_falls_through(void) {
     CPU cpu; cpu_reset(&cpu);
     Memory mem;
     mem_init(&mem, 16);
@@ -3232,6 +3231,53 @@ void test_pmp_fetch_is_checked_per_halfword(void) {
     }
 }
 
+void test_cpu_step_compressed_jumps_and_branches_to_2_aligned_targets(void) {
+    CPU cpu; Memory mem;
+    pmp_rig(&cpu, &mem, PRV_M);
+    mem_write16(&mem, 0, 0xA009);                 /* c.j .+2 */
+    mem_write16(&mem, 2, C_LI_A0_3);              /* c.li x10, 3 */
+    cpu.pc = 0;
+    cpu_step(&cpu, &mem);
+    TEST_ASSERT_EQUAL_UINT32(2, cpu.pc);
+    cpu_step(&cpu, &mem);
+    TEST_ASSERT_EQUAL_UINT32(4, cpu.pc);
+    TEST_ASSERT_EQUAL_UINT32(3, cpu_read_reg(&cpu, 10));
+    TEST_ASSERT_EQUAL_UINT32(0x77, cpu_read_csr(&cpu, CSR_MCAUSE));
+    mem_free(&mem);
+
+    pmp_rig(&cpu, &mem, PRV_M);
+    mem_write16(&mem, 0, 0xC009);                 /* c.beqz x8, .+2 with x8 = 0: taken */
+    cpu.pc = 0;
+    cpu_step(&cpu, &mem);
+    TEST_ASSERT_EQUAL_UINT32(2, cpu.pc);
+    TEST_ASSERT_EQUAL_UINT32(0x77, cpu_read_csr(&cpu, CSR_MCAUSE));
+    mem_free(&mem);
+}
+
+void test_cpu_step_32_bit_jal_at_a_2_aligned_pc_links_the_next_instruction(void) {
+    CPU cpu; Memory mem;
+    pmp_rig(&cpu, &mem, PRV_M);
+    mem_write32(&mem, 2, 0x006000EF);             /* JAL x1, +6 */
+    cpu.pc = 2;
+    cpu_step(&cpu, &mem);
+    TEST_ASSERT_EQUAL_UINT32(6, cpu_read_reg(&cpu, 1));
+    TEST_ASSERT_EQUAL_UINT32(8, cpu.pc);
+    TEST_ASSERT_EQUAL_UINT32(0x77, cpu_read_csr(&cpu, CSR_MCAUSE));
+    mem_free(&mem);
+}
+
+void test_mret_returns_to_a_2_aligned_mepc(void) {
+    CPU cpu; cpu_reset(&cpu);
+    Memory mem;
+    mem_init(&mem, 16);
+    cpu_write_csr(&cpu, CSR_MEPC, 0x2002);
+    mem_write32(&mem, 0, 0x30200073); // MRET
+    DecodedInstruction instr = decode_instruction(0x30200073);
+    execute(&cpu, &mem, &instr);
+    TEST_ASSERT_EQUAL_UINT32(0x2002, cpu.pc);
+    mem_free(&mem);
+}
+
 /* Read-only CSR addresses (csr[11:10] == 0b11), here 0xF14 (mhartid) */
 void test_csrrw_read_only_csr_traps(void) {
     assert_csr_access_illegal(0xF1409073, 0xF14, 7); // CSRRW x0, mhartid, x1
@@ -4188,17 +4234,12 @@ int main(void) {
     RUN_TEST(test_illegal_op_alt_funct7_in_slt_slot);
     RUN_TEST(test_illegal_slli_nonzero_funct7);
     RUN_TEST(test_illegal_srli_unknown_funct7);
-    RUN_TEST(test_jal_misaligned_target);
-    RUN_TEST(test_jalr_misaligned_target);
-    RUN_TEST(test_jalr_misaligned_target_after_clearing_bit0);
+    RUN_TEST(test_jal_to_a_2_aligned_target);
+    RUN_TEST(test_jalr_to_a_2_aligned_target);
+    RUN_TEST(test_jalr_to_a_2_aligned_target_after_clearing_bit0);
     RUN_TEST(test_jalr_ignores_target_bit0);
-    RUN_TEST(test_beq_misaligned_target);
-    RUN_TEST(test_bne_misaligned_target);
-    RUN_TEST(test_blt_misaligned_target);
-    RUN_TEST(test_bge_misaligned_target);
-    RUN_TEST(test_bltu_misaligned_target);
-    RUN_TEST(test_bgeu_misaligned_target);
-    RUN_TEST(test_branch_not_taken_misaligned_target_no_trap);
+    RUN_TEST(test_taken_branches_to_a_2_aligned_target);
+    RUN_TEST(test_branch_not_taken_to_a_2_aligned_target_falls_through);
     RUN_TEST(test_csrrw_mtvec_clears_mode_bits);
     RUN_TEST(test_csrrwi_mtvec_clears_mode_bits);
     RUN_TEST(test_trap_jumps_to_mtvec_base);
@@ -4309,6 +4350,9 @@ int main(void) {
     RUN_TEST(test_c_ebreak_traps_with_mepc_at_a_2_aligned_pc);
     RUN_TEST(test_illegal_compressed_instruction_reports_its_16_bits);
     RUN_TEST(test_pmp_fetch_is_checked_per_halfword);
+    RUN_TEST(test_cpu_step_compressed_jumps_and_branches_to_2_aligned_targets);
+    RUN_TEST(test_cpu_step_32_bit_jal_at_a_2_aligned_pc_links_the_next_instruction);
+    RUN_TEST(test_mret_returns_to_a_2_aligned_mepc);
     RUN_TEST(test_csrr_misa_reports_the_implemented_extensions);
     RUN_TEST(test_csrr_tdata1_reads_zero);
     RUN_TEST(test_tdata1_write_does_not_read_back);

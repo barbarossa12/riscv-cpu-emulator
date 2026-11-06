@@ -18,7 +18,6 @@ static uint32_t execute_system(CPU *cpu, Memory *mem, DecodedInstruction *instr,
 static uint32_t trap_enter(CPU *cpu, uint32_t pc, uint32_t cause, uint32_t tval);
 static uint32_t ecall_cause(PrivMode mode);
 static const char *mode_name(PrivMode mode);
-static bool target_misaligned(uint32_t target);
 static bool csr_exists(uint16_t csr_addr);
 static bool csr_is_read_only(uint16_t csr_addr);
 static bool csr_is_debug_only(uint16_t csr_addr);
@@ -495,9 +494,6 @@ static uint32_t execute_branch(CPU *cpu, Memory *mem, DecodedInstruction *instr,
 static uint32_t execute_jal(CPU *cpu, Memory *mem, DecodedInstruction *instr, uint32_t pc) {
     (void)mem;
     uint32_t target = pc + (uint32_t)instr->imm;
-    if (target_misaligned(target)) {
-        return trap_enter(cpu, pc, 0, target); // instruction address misaligned
-    }
     cpu_write_reg(cpu, instr->rd, pc + instr->length);
     return target;
 }
@@ -509,9 +505,6 @@ static uint32_t execute_jalr(CPU *cpu, Memory *mem, DecodedInstruction *instr, u
         {
             uint32_t rs1_val = cpu_read_reg(cpu, instr->rs1);
             uint32_t target = (rs1_val + (uint32_t)instr->imm) & ~1u;
-            if (target_misaligned(target)) {
-                return trap_enter(cpu, pc, 0, target); // instruction address misaligned
-            }
             cpu_write_reg(cpu, instr->rd, pc + instr->length);
             return target;
         }
@@ -748,18 +741,10 @@ static bool csr_instr_writes(DecodedInstruction *instr) {
     }
 }
 
-// IALIGN=32: a taken branch/jump target must be 4-byte aligned
-static bool target_misaligned(uint32_t target) {
-    return (target & 0x3u) != 0;
-}
-
-// Target of a taken conditional branch, or a misaligned-instruction trap
+// Target of a taken conditional branch. With IALIGN=16 and even offsets it is always aligned.
 static uint32_t take_branch(CPU *cpu, uint32_t pc, DecodedInstruction *instr) {
-    uint32_t target = pc + (uint32_t)instr->imm;
-    if (target_misaligned(target)) {
-        return trap_enter(cpu, pc, 0, target); // instruction address misaligned
-    }
-    return target;
+    (void)cpu;
+    return pc + (uint32_t)instr->imm;
 }
 
 static const char *mode_name(PrivMode mode) {
