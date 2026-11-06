@@ -152,15 +152,15 @@ void test_cpu_mstatus_reads_zero_after_reset(void) {
 
 void test_cpu_mstatus_writable_bits_round_trip(void) {
 	CPU c; cpu_reset(&c);
-	cpu_write_csr(&c, CSR_MSTATUS, 0x006219AA);   // every writable bit, MPP = M
-	TEST_ASSERT_EQUAL_UINT32(0x006219AA, cpu_read_csr(&c, CSR_MSTATUS));
+	cpu_write_csr(&c, CSR_MSTATUS, 0x007E19AA);   // every writable bit, MPP = M
+	TEST_ASSERT_EQUAL_UINT32(0x007E19AA, cpu_read_csr(&c, CSR_MSTATUS));
 }
 
 void test_cpu_mstatus_unimplemented_bits_read_zero(void) {
 	CPU c; cpu_reset(&c);
 	cpu_write_csr(&c, CSR_MSTATUS, 0xFFFFFFFF);   // MPP = 3, so legal
-	// everything outside the writable set (UBE, VS, FS, XS, SUM, MXR, TVM, SD) is dropped
-	TEST_ASSERT_EQUAL_UINT32(0x006219AA, cpu_read_csr(&c, CSR_MSTATUS));
+	// everything outside the writable set (UBE, VS, FS, XS, SD) is dropped
+	TEST_ASSERT_EQUAL_UINT32(0x007E19AA, cpu_read_csr(&c, CSR_MSTATUS));
 }
 
 void test_cpu_mstatus_mpp_accepts_u_s_and_m(void) {
@@ -307,7 +307,10 @@ void test_cpu_sstatus_reads_the_s_view_of_mstatus(void) {
 		{0x00000020, 0x00000020}, // SPIE
 		{0x00000100, 0x00000100}, // SPP
 		{0x00001800, 0x00000000}, // MPP
-		{0x006219AA, 0x00000122}, // every writable mstatus bit
+		{0x00040000, 0x00040000}, // SUM
+		{0x00080000, 0x00080000}, // MXR
+		{0x00100000, 0x00000000}, // TVM
+		{0x007E19AA, 0x000C0122}, // every writable mstatus bit
 	};
 	for (unsigned i = 0; i < sizeof v / sizeof v[0]; i++) {
 		CPU c; cpu_reset(&c);
@@ -320,8 +323,8 @@ void test_cpu_sstatus_writes_touch_only_the_s_bits(void) {
 	CPU c; cpu_reset(&c);
 	cpu_write_csr(&c, CSR_MSTATUS, 0x1888);           // MIE, MPIE, MPP = M
 	cpu_write_csr(&c, CSR_SSTATUS, 0xFFFFFFFF);
-	TEST_ASSERT_EQUAL_UINT32(0x19AA, cpu_read_csr(&c, CSR_MSTATUS));
-	TEST_ASSERT_EQUAL_UINT32(0x0122, cpu_read_csr(&c, CSR_SSTATUS)); // SUM, MXR, FS, ... stay 0
+	TEST_ASSERT_EQUAL_UINT32(0xC19AA, cpu_read_csr(&c, CSR_MSTATUS));
+	TEST_ASSERT_EQUAL_UINT32(0xC0122, cpu_read_csr(&c, CSR_SSTATUS)); // SIE, SPIE, SPP, SUM, MXR; FS, ... stay 0
 	cpu_write_csr(&c, CSR_SSTATUS, 0);
 	TEST_ASSERT_EQUAL_UINT32(0x1888, cpu_read_csr(&c, CSR_MSTATUS));
 }
@@ -421,12 +424,24 @@ void test_cpu_s_registers_are_independent_of_the_m_registers(void) {
 	}
 }
 
-void test_cpu_satp_is_read_only_zero(void) {
+void test_cpu_satp_is_a_plain_32_bit_register(void) {
 	CPU c; cpu_reset(&c);
-	cpu_write_csr(&c, CSR_SATP, 0xFFFFFFFF);
 	TEST_ASSERT_EQUAL_UINT32(0, cpu_read_csr(&c, CSR_SATP));
-	cpu_write_csr(&c, CSR_SATP, 0x80000000);          // MODE = Sv32 would be the next step
+	cpu_write_csr(&c, CSR_SATP, 0xFFFFFFFF);          // MODE, a 9-bit ASID and a 22-bit PPN: all 32 bits exist
+	TEST_ASSERT_EQUAL_UINT32(0xFFFFFFFF, cpu_read_csr(&c, CSR_SATP));
+	cpu_write_csr(&c, CSR_SATP, 0x80012345);          // MODE = Sv32, ASID = 0, PPN = 0x12345
+	TEST_ASSERT_EQUAL_UINT32(0x80012345, cpu_read_csr(&c, CSR_SATP));
+	cpu_write_csr(&c, CSR_SATP, 0);
 	TEST_ASSERT_EQUAL_UINT32(0, cpu_read_csr(&c, CSR_SATP));
+}
+
+void test_cpu_mstatus_sum_mxr_and_tvm_each_round_trip(void) {
+	const uint32_t bits[] = {MSTATUS_SUM, MSTATUS_MXR, MSTATUS_TVM};
+	for (unsigned i = 0; i < 3; i++) {
+		CPU c; cpu_reset(&c);
+		cpu_write_csr(&c, CSR_MSTATUS, 0x1800 | bits[i]);
+		TEST_ASSERT_EQUAL_UINT32(0x1800 | bits[i], cpu_read_csr(&c, CSR_MSTATUS));
+	}
 }
 
 /* ---- Delegation registers ---------------------------------------------------------------- */
@@ -650,7 +665,8 @@ int main(void) {
 	RUN_TEST(test_cpu_stvec_drops_two_low_bits_and_sepc_drops_bit_zero);
 	RUN_TEST(test_cpu_plain_s_registers_round_trip);
 	RUN_TEST(test_cpu_s_registers_are_independent_of_the_m_registers);
-	RUN_TEST(test_cpu_satp_is_read_only_zero);
+	RUN_TEST(test_cpu_satp_is_a_plain_32_bit_register);
+	RUN_TEST(test_cpu_mstatus_sum_mxr_and_tvm_each_round_trip);
 	RUN_TEST(test_cpu_medeleg_writable_mask);
 	RUN_TEST(test_cpu_medeleg_each_bit);
 	RUN_TEST(test_cpu_mideleg_writable_mask);

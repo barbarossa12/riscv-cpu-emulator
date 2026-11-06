@@ -73,6 +73,9 @@
 #define MSTATUS_SPP  (1u << 8)
 #define MSTATUS_MPP  (3u << 11)
 #define MSTATUS_MPRV (1u << 17)
+#define MSTATUS_SUM  (1u << 18)
+#define MSTATUS_MXR  (1u << 19)
+#define MSTATUS_TVM  (1u << 20)
 #define MSTATUS_TW   (1u << 21)
 #define MSTATUS_TSR  (1u << 22)
 
@@ -82,12 +85,12 @@
 #define MIDELEG_WRITABLE INT_S_ALL
 
 // The part of mstatus that sstatus shows
-#define SSTATUS_MASK (MSTATUS_SIE | MSTATUS_SPIE | MSTATUS_SPP)   // 0x122
+#define SSTATUS_MASK (MSTATUS_SIE | MSTATUS_SPIE | MSTATUS_SPP | MSTATUS_SUM | MSTATUS_MXR)   // 0xC0122
 
-// Bits of mstatus that exist. Everything else (UBE, FS, VS, XS, SUM, MXR,
-// TVM, SD, ...) is read-only 0 for now.
+// Bits of mstatus that exist. Everything else (UBE, FS, VS, XS, SD, ...) is read-only 0 for now.
 #define MSTATUS_WRITABLE (MSTATUS_SIE | MSTATUS_MIE | MSTATUS_SPIE | MSTATUS_MPIE | \
-                          MSTATUS_SPP | MSTATUS_MPP | MSTATUS_MPRV | MSTATUS_TW | MSTATUS_TSR)
+                          MSTATUS_SPP | MSTATUS_MPP | MSTATUS_MPRV | MSTATUS_SUM | MSTATUS_MXR | MSTATUS_TVM | \
+                          MSTATUS_TW | MSTATUS_TSR)
 
 // Privilege modes, encoded the same way as mstatus.MPP (the value 2 is reserved)
 typedef enum {

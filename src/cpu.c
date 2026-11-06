@@ -52,8 +52,6 @@ uint32_t cpu_read_csr(CPU *cpu, uint16_t addr){
 			return cpu->csr[CSR_MIE] & cpu->csr[CSR_MIDELEG] & INT_S_ALL;
 		case CSR_SIP:
 			return cpu->csr[CSR_MIP] & cpu->csr[CSR_MIDELEG] & INT_S_ALL;
-		case CSR_SATP:  // read-only 0 until Milestone 5
-			return 0;
 		case CSR_MSTATUSH:
 		case CSR_MEDELEGH:
 			return 0;
@@ -148,8 +146,6 @@ void cpu_write_csr(CPU *cpu, uint16_t addr, uint32_t value) {
 			cpu->csr[CSR_MIP] = (cpu->csr[CSR_MIP] & ~m) | (value & m);
 			return;
 		}
-		case CSR_SATP:
-			return;                                              // read-only 0 until Milestone 5
 		case CSR_MEDELEG:
 			cpu->csr[addr] = value & MEDELEG_WRITABLE;
 			return;
