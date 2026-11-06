@@ -49,8 +49,8 @@
 #define CSR_CYCLEH    0xC80
 #define CSR_INSTRETH  0xC82
 
-// MXL=1 (RV32) in bits 31:30, plus I (bit 8), M (bit 12), S-mode (bit 18) and U-mode (bit 20)
-#define MISA_VALUE    0x40141100u
+// MXL=1 (RV32) in bits 31:30, plus A (bit 0), I (bit 8), M (bit 12), S-mode (bit 18) and U-mode (bit 20)
+#define MISA_VALUE    0x40141101u
 
 // Counter-enable CSRs. Only the CY and IR bits exist: TM is absent until `time` exists
 // (Milestone 6) and there are no hpmcounters, so every other bit is read-only 0.
@@ -104,6 +104,9 @@ typedef struct CPU {
 	uint8_t  pmpcfg[PMP_ENTRIES];    // one config byte per implemented PMP entry
 	uint32_t pmpaddr[PMP_ENTRIES];   // address bits 33:2 of each entry's region
 	PrivMode privilege_mode; // current mode. A zeroed CPU is in U-mode, so call cpu_reset()
+
+	bool     lr_valid;  // a load reservation is held (LR.W sets it; any SC.W clears it)
+	uint32_t lr_addr;   // address of the reserved word
 
 	uint64_t mcycle;    // behind mcycle/mcycleh and the cycle/cycleh shadows
 	uint64_t minstret;  // behind minstret/minstreth and the instret/instreth shadows
