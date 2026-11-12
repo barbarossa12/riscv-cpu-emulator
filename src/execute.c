@@ -1,6 +1,7 @@
 #include "execute.h"
 #include "log.h"
 #include "pmp.h"
+#include "mmu.h"
 #include "compressed.h"
 
 static uint32_t execute_op_imm(CPU *cpu, Memory *mem, DecodedInstruction *instr, uint32_t pc);
@@ -235,107 +236,168 @@ static PrivMode data_access_mode(CPU *cpu) {
     return cpu->privilege_mode;
 }
 
-static bool data_access_ok(CPU *cpu, uint32_t addr, uint32_t size, PmpAccess access) {
-    return pmp_check(cpu, addr, size, access, data_access_mode(cpu));
+// A data access split at a page boundary: up to two pieces, each inside one page.
+typedef struct {
+    uint32_t va[2];    // virtual address of each piece (the second starts at the page boundary)
+    uint32_t pa[2];
+    uint32_t len[2];
+    int n;
+} DataPieces;
+
+// Translates and PMP-checks every piece of a size-byte access at va before anything is read or
+// written. An access is only split when translation is active and it crosses a 4 KiB boundary:
+// the two pages can map anywhere. Otherwise it is one physical access, PMP-checked as a whole.
+// On failure returns false with the trap cause and the faulting piece's virtual address.
+static bool data_plan(CPU *cpu, Memory *mem, uint32_t va, uint32_t size, AccessType type,
+                      DataPieces *p, uint32_t *cause, uint32_t *tval) {
+    PrivMode mode = data_access_mode(cpu);
+    bool is_load = type == ACCESS_LOAD;
+    uint32_t first = size;
+    if (mmu_enabled(cpu, mode)) {
+        uint32_t room = 0x1000u - (va & 0xFFFu);
+        if (room < size) {
+            first = room;
+        }
+    }
+    p->n = (first == size) ? 1 : 2;
+    p->va[0] = va;          p->len[0] = first;
+    p->va[1] = va + first;  p->len[1] = size - first;   // page-aligned when there is a second piece
+
+    for (int i = 0; i < p->n; i++) {
+        XlateResult r = mmu_translate(cpu, mem, p->va[i], type, mode, &p->pa[i]);
+        if (r == XLATE_PAGE_FAULT) {
+            *cause = is_load ? 13 : 15;
+            *tval = p->va[i];
+            return false;
+        }
+        if (r == XLATE_ACCESS_FAULT ||
+            !pmp_check(cpu, p->pa[i], p->len[i], is_load ? PMP_ACCESS_READ : PMP_ACCESS_WRITE, mode)) {
+            *cause = is_load ? 5 : 7;
+            *tval = p->va[i];
+            return false;
+        }
+    }
+    return true;
+}
+
+// Little-endian physical read or write of 1 to 4 bytes. False if any byte is outside memory.
+static bool phys_read(Memory *mem, uint32_t pa, uint32_t len, uint32_t *out) {
+    uint8_t b8;
+    uint16_t b16;
+    switch (len) {
+        case 1: if (!mem_try_read8(mem, pa, &b8))   return false; *out = b8;  return true;
+        case 2: if (!mem_try_read16(mem, pa, &b16)) return false; *out = b16; return true;
+        case 4: return mem_try_read32(mem, pa, out);
+        default:
+            *out = 0;
+            for (uint32_t i = 0; i < len; i++) {
+                if (!mem_try_read8(mem, pa + i, &b8)) return false;
+                *out |= (uint32_t)b8 << (8 * i);
+            }
+            return true;
+    }
+}
+
+static bool phys_write(Memory *mem, uint32_t pa, uint32_t len, uint32_t val) {
+    switch (len) {
+        case 1: return mem_try_write8(mem, pa, (uint8_t)val);
+        case 2: return mem_try_write16(mem, pa, (uint16_t)val);
+        case 4: return mem_try_write32(mem, pa, val);
+        default:
+            for (uint32_t i = 0; i < len; i++) {
+                if (!mem_try_write8(mem, pa + i, (uint8_t)(val >> (8 * i)))) return false;
+            }
+            return true;
+    }
+}
+
+// Loads size bytes (zero-extended) from a virtual address. first_pa, if not NULL, gets the physical
+// address of the first byte. On failure returns false with the trap cause and tval.
+static bool data_load(CPU *cpu, Memory *mem, uint32_t va, uint32_t size, uint32_t *out,
+                      uint32_t *first_pa, uint32_t *cause, uint32_t *tval) {
+    DataPieces p;
+    if (!data_plan(cpu, mem, va, size, ACCESS_LOAD, &p, cause, tval)) {
+        return false;
+    }
+    uint32_t value = 0, shift = 0;
+    for (int i = 0; i < p.n; i++) {
+        uint32_t part;
+        if (!phys_read(mem, p.pa[i], p.len[i], &part)) {
+            *cause = 5;                                // load access fault
+            *tval = p.va[i];
+            return false;
+        }
+        value |= part << shift;
+        shift += 8 * p.len[i];
+    }
+    if (first_pa) {
+        *first_pa = p.pa[0];
+    }
+    *out = value;
+    return true;
+}
+
+// Stores the low size bytes of val. Every piece is translated, checked and found inside memory before
+// the first byte is written, so a fault on the second page leaves the first untouched.
+static bool data_store(CPU *cpu, Memory *mem, uint32_t va, uint32_t size, uint32_t val,
+                       uint32_t *cause, uint32_t *tval) {
+    DataPieces p;
+    if (!data_plan(cpu, mem, va, size, ACCESS_STORE, &p, cause, tval)) {
+        return false;
+    }
+    for (int i = 0; i < p.n; i++) {
+        uint32_t probe;
+        if (!phys_read(mem, p.pa[i], p.len[i], &probe)) {
+            *cause = 7;                                // store/AMO access fault
+            *tval = p.va[i];
+            return false;
+        }
+    }
+    uint32_t shift = 0;
+    for (int i = 0; i < p.n; i++) {
+        phys_write(mem, p.pa[i], p.len[i], val >> shift);   // cannot fail, probed above
+        shift += 8 * p.len[i];
+    }
+    return true;
 }
 
 static uint32_t execute_load(CPU *cpu, Memory *mem, DecodedInstruction *instr, uint32_t pc) {
+    uint32_t size;
     switch(instr->funct3) {
-        case 0x0: // LB
-        {
-            uint32_t rs1_val = cpu_read_reg(cpu, instr->rs1);
-            uint32_t addr = rs1_val + (uint32_t)instr->imm;
-            uint8_t byte_val;
-            if (!data_access_ok(cpu, addr, 1, PMP_ACCESS_READ) || !mem_try_read8(mem, addr, &byte_val)) {
-                return trap_enter(cpu, pc, 5, addr); // load access fault
-            }
-            cpu_write_reg(cpu, instr->rd, (uint32_t)(int32_t)(int8_t)byte_val);  // sign-extend
-            return pc + instr->length;
-        }
-        case 0x1: // LH
-        {
-            uint32_t rs1_val = cpu_read_reg(cpu, instr->rs1);
-            uint32_t addr = rs1_val + (uint32_t)instr->imm;
-            uint16_t half_val;
-            if (!data_access_ok(cpu, addr, 2, PMP_ACCESS_READ) || !mem_try_read16(mem, addr, &half_val)) {
-                return trap_enter(cpu, pc, 5, addr); // load access fault
-            }
-            cpu_write_reg(cpu, instr->rd, (uint32_t)(int32_t)(int16_t)half_val); // sign extended
-            return pc + instr->length;
-        }
-        case 0x2: // LW
-        {
-            uint32_t rs1_val = cpu_read_reg(cpu, instr->rs1);
-            uint32_t addr = rs1_val + (uint32_t)instr->imm;
-            uint32_t word;
-            if (!data_access_ok(cpu, addr, 4, PMP_ACCESS_READ) || !mem_try_read32(mem, addr, &word)) {
-                return trap_enter(cpu, pc, 5, addr); // load access fault
-            }
-            cpu_write_reg(cpu, instr->rd, word);
-            return pc + instr->length;
-        }
-        case 0x4: // LBU
-        {
-            uint32_t rs1_val = cpu_read_reg(cpu, instr->rs1);
-            uint32_t addr = rs1_val + (uint32_t)instr->imm;
-            uint8_t byte_val;
-            if (!data_access_ok(cpu, addr, 1, PMP_ACCESS_READ) || !mem_try_read8(mem, addr, &byte_val)) {
-                return trap_enter(cpu, pc, 5, addr); // load access fault
-            }
-            cpu_write_reg(cpu, instr->rd, (uint32_t)byte_val);           // zero-extend
-            return pc + instr->length;
-        }
-        case 0x5: // LHU
-        {
-            uint32_t rs1_val = cpu_read_reg(cpu, instr->rs1);
-            uint32_t addr = rs1_val + (uint32_t)instr->imm;
-            uint16_t half_val;
-            if (!data_access_ok(cpu, addr, 2, PMP_ACCESS_READ) || !mem_try_read16(mem, addr, &half_val)) {
-                return trap_enter(cpu, pc, 5, addr); // load access fault
-            }
-            cpu_write_reg(cpu, instr->rd, (uint32_t)half_val); //zero-extended
-            return pc + instr->length;
-        }
+        case 0x0: case 0x4: size = 1; break;           // LB, LBU
+        case 0x1: case 0x5: size = 2; break;           // LH, LHU
+        case 0x2: size = 4; break;                     // LW
         default:
             return trap_enter(cpu, pc, 2, instr->raw); // illegal instruction
     }
+    uint32_t addr = cpu_read_reg(cpu, instr->rs1) + (uint32_t)instr->imm;
+    uint32_t value, cause, tval;
+    if (!data_load(cpu, mem, addr, size, &value, NULL, &cause, &tval)) {
+        return trap_enter(cpu, pc, cause, tval);       // load page fault or access fault
+    }
+    if (instr->funct3 == 0x0) {
+        value = (uint32_t)(int32_t)(int8_t)value;      // LB: sign-extend
+    } else if (instr->funct3 == 0x1) {
+        value = (uint32_t)(int32_t)(int16_t)value;     // LH: sign-extend
+    }
+    cpu_write_reg(cpu, instr->rd, value);
     return pc + instr->length;
 }
 
 static uint32_t execute_store(CPU *cpu, Memory *mem, DecodedInstruction *instr, uint32_t pc) {
+    uint32_t size;
     switch(instr->funct3) {
-        case 0x0: // SB
-        {
-            uint32_t rs1_val = cpu_read_reg(cpu, instr->rs1);
-            uint32_t addr = rs1_val + (uint32_t)instr->imm;
-            uint32_t rs2_val = cpu_read_reg(cpu, instr->rs2);
-            if (!data_access_ok(cpu, addr, 1, PMP_ACCESS_WRITE) || !mem_try_write8(mem, addr, (uint8_t)rs2_val)) {
-                return trap_enter(cpu, pc, 7, addr); // store/AMO access fault
-            }
-            return pc + instr->length;
-        }
-        case 0x1: // SH
-        {
-            uint32_t rs1_val = cpu_read_reg(cpu, instr->rs1);
-            uint32_t addr = rs1_val + (uint32_t)instr->imm;
-            uint32_t rs2_val = cpu_read_reg(cpu, instr->rs2);
-            if (!data_access_ok(cpu, addr, 2, PMP_ACCESS_WRITE) || !mem_try_write16(mem, addr, (uint16_t)rs2_val)) {
-                return trap_enter(cpu, pc, 7, addr); // store/AMO access fault
-            }
-            return pc + instr->length;
-        }
-        case 0x2: // SW
-        {
-            uint32_t rs1_val = cpu_read_reg(cpu, instr->rs1);
-            uint32_t addr = rs1_val + (uint32_t)instr->imm;
-            uint32_t rs2_val = cpu_read_reg(cpu, instr->rs2);
-            if (!data_access_ok(cpu, addr, 4, PMP_ACCESS_WRITE) || !mem_try_write32(mem, addr, rs2_val)) {
-                return trap_enter(cpu, pc, 7, addr); // store/AMO access fault
-            }
-            return pc + instr->length;
-        }
+        case 0x0: size = 1; break;                     // SB
+        case 0x1: size = 2; break;                     // SH
+        case 0x2: size = 4; break;                     // SW
         default:
             return trap_enter(cpu, pc, 2, instr->raw); // illegal instruction
+    }
+    uint32_t addr = cpu_read_reg(cpu, instr->rs1) + (uint32_t)instr->imm;
+    uint32_t rs2_val = cpu_read_reg(cpu, instr->rs2);
+    uint32_t cause, tval;
+    if (!data_store(cpu, mem, addr, size, rs2_val, &cause, &tval)) {
+        return trap_enter(cpu, pc, cause, tval);       // store/AMO page fault or access fault
     }
     return pc + instr->length;
 }
@@ -372,15 +434,15 @@ static uint32_t execute_lr_sc(CPU *cpu, Memory *mem, DecodedInstruction *instr, 
         if (instr->rs2 != 0) {
             return trap_enter(cpu, pc, 2, instr->raw);     // rs2 is a fixed 0 field
         }
-        uint32_t value;
+        uint32_t value, pa, cause, tval;
         if (addr & 0x3u) {
             return trap_enter(cpu, pc, 4, addr);           // load address-misaligned
         }
-        if (!data_access_ok(cpu, addr, 4, PMP_ACCESS_READ) || !mem_try_read32(mem, addr, &value)) {
-            return trap_enter(cpu, pc, 5, addr);           // load access fault
+        if (!data_load(cpu, mem, addr, 4, &value, &pa, &cause, &tval)) {
+            return trap_enter(cpu, pc, cause, tval);       // load page fault or access fault
         }
         cpu->lr_valid = true;
-        cpu->lr_addr = addr;
+        cpu->lr_addr = pa;                                 // the reservation is on the physical address
         cpu_write_reg(cpu, instr->rd, value);
         return pc + instr->length;
     }
@@ -388,11 +450,14 @@ static uint32_t execute_lr_sc(CPU *cpu, Memory *mem, DecodedInstruction *instr, 
     if (addr & 0x3u) {
         return trap_enter(cpu, pc, 6, addr);               // store/AMO address-misaligned
     }
-    bool success = cpu->lr_valid && cpu->lr_addr == addr;
-    uint32_t probe;
+    DataPieces p;
+    uint32_t cause, tval, probe;
     // A store-conditional must pass the store checks even when it is going to fail.
-    if (!data_access_ok(cpu, addr, 4, PMP_ACCESS_WRITE) || !mem_try_read32(mem, addr, &probe) ||
-        (success && !mem_try_write32(mem, addr, src))) {
+    if (!data_plan(cpu, mem, addr, 4, ACCESS_STORE, &p, &cause, &tval)) {
+        return trap_enter(cpu, pc, cause, tval);           // store/AMO page fault or access fault
+    }
+    bool success = cpu->lr_valid && cpu->lr_addr == p.pa[0];
+    if (!phys_read(mem, p.pa[0], 4, &probe) || (success && !phys_write(mem, p.pa[0], 4, src))) {
         return trap_enter(cpu, pc, 7, addr);               // store/AMO access fault
     }
     cpu->lr_valid = false;                                 // success or failure
@@ -418,10 +483,15 @@ static uint32_t execute_amo(CPU *cpu, Memory *mem, DecodedInstruction *instr, ui
     if (addr & 0x3u) {
         return trap_enter(cpu, pc, 6, addr);               // store/AMO address-misaligned
     }
-    uint32_t old;
-    // An AMO reads and writes; W without R cannot exist under our PMP rules, so a write check covers both.
-    if (!data_access_ok(cpu, addr, 4, PMP_ACCESS_WRITE) || !mem_try_read32(mem, addr, &old) ||
-        !mem_try_write32(mem, addr, amo_result(funct5, old, src))) {
+    DataPieces p;
+    uint32_t old, cause, tval;
+    // An AMO reads and writes; W without R cannot exist under our PMP rules, and it never raises a load
+    // fault (an unreadable page is unwritable), so planning it as a store covers both.
+    if (!data_plan(cpu, mem, addr, 4, ACCESS_STORE, &p, &cause, &tval)) {
+        return trap_enter(cpu, pc, cause, tval);           // store/AMO page fault or access fault
+    }
+    if (!phys_read(mem, p.pa[0], 4, &old) ||
+        !phys_write(mem, p.pa[0], 4, amo_result(funct5, old, src))) {
         return trap_enter(cpu, pc, 7, addr);               // store/AMO access fault
     }
     cpu_write_reg(cpu, instr->rd, old);

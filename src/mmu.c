@@ -12,6 +12,10 @@
 #define PTE_A (1u << 6)
 #define PTE_D (1u << 7)
 
+bool mmu_enabled(const CPU *cpu, PrivMode priv) {
+	return priv != PRV_M && (cpu->csr[CSR_SATP] & SATP_MODE_SV32);
+}
+
 XlateResult mmu_translate(CPU *cpu, Memory *mem, uint32_t va, AccessType type,
                           PrivMode priv, uint32_t *pa) {
 	uint32_t satp = cpu_read_csr(cpu, CSR_SATP);
