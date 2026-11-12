@@ -14,7 +14,7 @@ if(RISCV_GCC)
     set(_riscv_tests_default ON)
 endif()
 option(RISCV_TESTS "Register the official riscv-tests (needs a RISC-V gcc)" ${_riscv_tests_default})
-set(RISCV_TESTS_SRC_DIR "${CMAKE_SOURCE_DIR}/riscv-tests" CACHE PATH "riscv-tests checkout")
+set(RISCV_TESTS_SRC_DIR "${CMAKE_SOURCE_DIR}/riscv-official-tests/riscv-tests" CACHE PATH "riscv-tests checkout")
 set(RISCV_TESTS_BUILD_DIR "${CMAKE_BINARY_DIR}/riscv-tests")
 
 if(RISCV_TESTS AND NOT EXISTS "${RISCV_TESTS_SRC_DIR}/env/p/riscv_test.h")
