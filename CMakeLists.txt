@@ -22,6 +22,7 @@ add_library(riscv_core
     src/mem.c
     src/log.c
     src/pmp.c
+    src/mmu.c
     src/decode.c
     src/compressed.c
     src/execute.c
