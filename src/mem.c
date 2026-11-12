@@ -6,12 +6,12 @@ void mem_init(Memory *mem, size_t size) {
 }
 
 void mem_init_at(Memory *mem, uint32_t base, size_t size) {
-	mem->buffer = (uint8_t*)malloc(size);
+	mem->buffer = (uint8_t*)calloc(size, 1); // zeroed, so unwritten memory reads as 0
 	if(mem->buffer) {
 		mem->size = size;
 		mem->base = base;
 	} else {
-		LOG_FATAL("Failed to allocate memory: malloc falied");
+		LOG_FATAL("Failed to allocate memory: calloc failed");
 	}
 }
 
