@@ -46,6 +46,10 @@ add_executable(test_mmu_fetch test_mmu_fetch.c)
 target_link_libraries(test_mmu_fetch PRIVATE riscv_core unity)
 add_test(NAME test_mmu_fetch COMMAND test_mmu_fetch)
 
+add_executable(test_mmu_tlb test_mmu_tlb.c)
+target_link_libraries(test_mmu_tlb PRIVATE riscv_core unity)
+add_test(NAME test_mmu_tlb COMMAND test_mmu_tlb)
+
 add_executable(test_log test_log.c)
 target_link_libraries(test_log PRIVATE riscv_core unity)
 add_test(NAME test_log COMMAND test_log)
