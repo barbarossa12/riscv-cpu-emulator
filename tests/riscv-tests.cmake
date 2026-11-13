@@ -32,6 +32,7 @@ if(RISCV_TESTS)
     set(RV32UA_TESTS
         amoadd_w amoand_w amomax_w amomaxu_w amomin_w amominu_w amoor_w amoswap_w amoxor_w lrsc)
     set(RV32UC_TESTS rvc)
+    set(RV32SI_TESTS csr dirty ma_fetch scall sbreak wfi)
     set(RV32MI_TESTS
         breakpoint csr mcsr illegal ma_fetch ma_addr scall sbreak shamt
         lw-misaligned lh-misaligned sh-misaligned sw-misaligned
@@ -58,6 +59,9 @@ if(RISCV_TESTS)
     endforeach()
     foreach(t ${RV32MI_TESTS})
         list(APPEND _names rv32mi-p-${t})
+    endforeach()
+    foreach(t ${RV32SI_TESTS})
+        list(APPEND _names rv32si-p-${t})
     endforeach()
 
     set(_build_cmd "${CMAKE_SOURCE_DIR}/scripts/build-riscv-tests.sh"
@@ -95,7 +99,8 @@ if(RISCV_TESTS)
         PASS_REGULAR_EXPRESSION "mret: M -> S.*sret: S -> S.*PASS")
 
     # Assembly tests of our own (tests/asm), built like the rv32mi tests and run like them.
-    set(_asm_sources ${CMAKE_SOURCE_DIR}/tests/asm/pmp_denial.S)
+    set(_asm_sources ${CMAKE_SOURCE_DIR}/tests/asm/pmp_denial.S
+                     ${CMAKE_SOURCE_DIR}/tests/asm/sv32_flow.S)
     add_test(NAME riscv-tests.build-asm
              COMMAND "${CMAKE_SOURCE_DIR}/scripts/build-asm-tests.sh"
                      "${RISCV_TESTS_SRC_DIR}" "${RISCV_TESTS_BUILD_DIR}" ${_asm_sources})
@@ -108,6 +113,14 @@ if(RISCV_TESTS)
     add_test(NAME riscv-tests.pmp-denial
              COMMAND riscv_emu "${RISCV_TESTS_BUILD_DIR}/pmp_denial")
     set_tests_properties(riscv-tests.pmp-denial PROPERTIES
+        FIXTURES_REQUIRED riscv-tests-elfs TIMEOUT 60 LABELS riscv-tests)
+
+    # Sv32 end to end: M-mode builds the tables, S-mode runs on a megapage, U-mode runs from a mapped
+    # page. Delegated load and store page faults, an undelegated instruction page fault, the user and
+    # SUM rules and the hardware A/D update, each checked by cause and faulting address.
+    add_test(NAME riscv-tests.sv32-flow
+             COMMAND riscv_emu "${RISCV_TESTS_BUILD_DIR}/sv32_flow")
+    set_tests_properties(riscv-tests.sv32-flow PROPERTIES
         FIXTURES_REQUIRED riscv-tests-elfs TIMEOUT 60 LABELS riscv-tests)
 
     foreach(name ${_names})
