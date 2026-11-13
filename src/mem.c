@@ -10,6 +10,7 @@ void mem_init_at(Memory *mem, uint32_t base, size_t size) {
 	if(mem->buffer) {
 		mem->size = size;
 		mem->base = base;
+		mem->device_count = 0;
 	} else {
 		LOG_FATAL("Failed to allocate memory: calloc failed");
 	}
@@ -20,6 +21,7 @@ void mem_free(Memory *mem) {
 	mem->buffer = NULL;
 	mem->size = 0;
 	mem->base = 0;
+	mem->device_count = 0;
 	LOG_DEBUG("Memory freed!");
 }
 
@@ -137,4 +139,85 @@ bool mem_try_write32(Memory *mem, uint32_t addr, uint32_t val) {
     mem->buffer[addr - mem->base + 2] = (uint8_t)((val >> 16) & 0xFF);
     mem->buffer[addr - mem->base + 3] = (uint8_t)((val >> 24) & 0xFF);
     return true;
+}
+
+/* ---- the bus ---------------------------------------------------------------------------------- */
+
+bool mem_in_ram(const Memory *mem, uint32_t addr, uint32_t n) {
+	return mem_in_bounds(mem, addr, n);
+}
+
+// The device that holds all size bytes starting at addr, or NULL.
+static const Device *device_for(const Memory *mem, uint32_t addr, uint32_t size) {
+	for (int i = 0; i < mem->device_count; i++) {
+		const Device *d = &mem->devices[i];
+		if (addr >= d->base && (uint64_t)(addr - d->base) + size <= d->size) {
+			return d;
+		}
+	}
+	return NULL;
+}
+
+// A device takes only naturally aligned accesses of a width it lists
+static bool device_takes(const Device *d, uint32_t addr, uint32_t size) {
+	uint32_t width = size == 1 ? DEV_ACCESS_8 : size == 2 ? DEV_ACCESS_16 : size == 4 ? DEV_ACCESS_32 : 0;
+	return width && (d->sizes & width) && addr % size == 0;
+}
+
+void mem_add_device(Memory *mem, Device dev) {
+	if (dev.size == 0 || (uint64_t)dev.base + dev.size > 0x100000000ull) {
+		LOG_FATAL("device at 0x%08x has a bad size 0x%x", dev.base, dev.size);
+	}
+	if (mem->device_count >= MEM_MAX_DEVICES) {
+		LOG_FATAL("too many devices (at most %d)", MEM_MAX_DEVICES);
+	}
+	uint64_t lo = dev.base, hi = lo + dev.size;
+	if (lo < (uint64_t)mem->base + mem->size && (uint64_t)mem->base < hi) {
+		LOG_FATAL("device at 0x%08x overlaps RAM", dev.base);
+	}
+	for (int i = 0; i < mem->device_count; i++) {
+		uint64_t other_lo = mem->devices[i].base, other_hi = other_lo + mem->devices[i].size;
+		if (lo < other_hi && other_lo < hi) {
+			LOG_FATAL("device at 0x%08x overlaps the device at 0x%08x", dev.base, mem->devices[i].base);
+		}
+	}
+	mem->devices[mem->device_count++] = dev;
+}
+
+bool mem_bus_read(Memory *mem, uint32_t addr, uint32_t size, uint32_t *out) {
+	if (mem_in_bounds(mem, addr, size)) {
+		uint32_t value = 0;
+		for (uint32_t i = 0; i < size; i++) {
+			value |= (uint32_t)mem->buffer[addr - mem->base + i] << (8 * i);
+		}
+		*out = value;
+		return true;
+	}
+	const Device *d = device_for(mem, addr, size);
+	if (!d || !d->read || !device_takes(d, addr, size)) {
+		return false;
+	}
+	return d->read(d->ctx, addr - d->base, size, out);
+}
+
+bool mem_bus_write(Memory *mem, uint32_t addr, uint32_t size, uint32_t val) {
+	if (mem_in_bounds(mem, addr, size)) {
+		for (uint32_t i = 0; i < size; i++) {
+			mem->buffer[addr - mem->base + i] = (uint8_t)(val >> (8 * i));
+		}
+		return true;
+	}
+	const Device *d = device_for(mem, addr, size);
+	if (!d || !d->write || !device_takes(d, addr, size)) {
+		return false;
+	}
+	return d->write(d->ctx, addr - d->base, size, val);
+}
+
+bool mem_bus_writable(Memory *mem, uint32_t addr, uint32_t size) {
+	if (mem_in_bounds(mem, addr, size)) {
+		return true;
+	}
+	const Device *d = device_for(mem, addr, size);
+	return d && d->write && device_takes(d, addr, size);
 }

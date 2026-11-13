@@ -312,8 +312,10 @@ static bool phys_write(Memory *mem, uint32_t pa, uint32_t len, uint32_t val) {
 }
 
 // Loads size bytes (zero-extended) from a virtual address. first_pa, if not NULL, gets the physical
-// address of the first byte. On failure returns false with the trap cause and tval.
-static bool data_load(CPU *cpu, Memory *mem, uint32_t va, uint32_t size, uint32_t *out,
+// address of the first byte. atomic (LR) reaches RAM only; a plain load also reaches devices, and then
+// the access must be a single piece: a split access that touches a device is an access fault.
+// On failure returns false with the trap cause and tval.
+static bool data_load(CPU *cpu, Memory *mem, uint32_t va, uint32_t size, bool atomic, uint32_t *out,
                       uint32_t *first_pa, uint32_t *cause, uint32_t *tval) {
     DataPieces p;
     if (!data_plan(cpu, mem, va, size, ACCESS_LOAD, &p, cause, tval)) {
@@ -322,7 +324,9 @@ static bool data_load(CPU *cpu, Memory *mem, uint32_t va, uint32_t size, uint32_
     uint32_t value = 0, shift = 0;
     for (int i = 0; i < p.n; i++) {
         uint32_t part;
-        if (!phys_read(mem, p.pa[i], p.len[i], &part)) {
+        bool ok = (atomic || p.n > 1) ? phys_read(mem, p.pa[i], p.len[i], &part)
+                                      : mem_bus_read(mem, p.pa[i], p.len[i], &part);
+        if (!ok) {
             *cause = 5;                                // load access fault
             *tval = p.va[i];
             return false;
@@ -337,8 +341,9 @@ static bool data_load(CPU *cpu, Memory *mem, uint32_t va, uint32_t size, uint32_
     return true;
 }
 
-// Stores the low size bytes of val. Every piece is translated, checked and found inside memory before
-// the first byte is written, so a fault on the second page leaves the first untouched.
+// Stores the low size bytes of val. Every piece is translated, checked and found writable before the
+// first byte is written, so a fault on the second page leaves the first untouched. Nothing is read
+// first: a read of a device can have side effects. A split access reaches RAM only.
 static bool data_store(CPU *cpu, Memory *mem, uint32_t va, uint32_t size, uint32_t val,
                        uint32_t *cause, uint32_t *tval) {
     DataPieces p;
@@ -346,8 +351,9 @@ static bool data_store(CPU *cpu, Memory *mem, uint32_t va, uint32_t size, uint32
         return false;
     }
     for (int i = 0; i < p.n; i++) {
-        uint32_t probe;
-        if (!phys_read(mem, p.pa[i], p.len[i], &probe)) {
+        bool ok = p.n > 1 ? mem_in_ram(mem, p.pa[i], p.len[i])
+                          : mem_bus_writable(mem, p.pa[i], p.len[i]);
+        if (!ok) {
             *cause = 7;                                // store/AMO access fault
             *tval = p.va[i];
             return false;
@@ -355,7 +361,11 @@ static bool data_store(CPU *cpu, Memory *mem, uint32_t va, uint32_t size, uint32
     }
     uint32_t shift = 0;
     for (int i = 0; i < p.n; i++) {
-        phys_write(mem, p.pa[i], p.len[i], val >> shift);   // cannot fail, probed above
+        if (!mem_bus_write(mem, p.pa[i], p.len[i], val >> shift)) {
+            *cause = 7;                                // the device refused this write
+            *tval = p.va[i];
+            return false;
+        }
         shift += 8 * p.len[i];
     }
     return true;
@@ -372,7 +382,7 @@ static uint32_t execute_load(CPU *cpu, Memory *mem, DecodedInstruction *instr, u
     }
     uint32_t addr = cpu_read_reg(cpu, instr->rs1) + (uint32_t)instr->imm;
     uint32_t value, cause, tval;
-    if (!data_load(cpu, mem, addr, size, &value, NULL, &cause, &tval)) {
+    if (!data_load(cpu, mem, addr, size, false, &value, NULL, &cause, &tval)) {
         return trap_enter(cpu, pc, cause, tval);       // load page fault or access fault
     }
     if (instr->funct3 == 0x0) {
@@ -438,7 +448,7 @@ static uint32_t execute_lr_sc(CPU *cpu, Memory *mem, DecodedInstruction *instr, 
         if (addr & 0x3u) {
             return trap_enter(cpu, pc, 4, addr);           // load address-misaligned
         }
-        if (!data_load(cpu, mem, addr, 4, &value, &pa, &cause, &tval)) {
+        if (!data_load(cpu, mem, addr, 4, true, &value, &pa, &cause, &tval)) {
             return trap_enter(cpu, pc, cause, tval);       // load page fault or access fault
         }
         cpu->lr_valid = true;
