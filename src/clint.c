@@ -11,6 +11,15 @@ void clint_tick(Clint *c) {
 	}
 }
 
+bool clint_idle_until_timer(Clint *c) {
+	if (c->mtimecmp == UINT64_MAX || c->mtime >= c->mtimecmp) {
+		return false;
+	}
+	c->mtime = c->mtimecmp;
+	c->phase = 0;
+	return true;
+}
+
 bool clint_timer_pending(const Clint *c) {
 	return c->mtime >= c->mtimecmp;
 }

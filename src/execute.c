@@ -686,7 +686,17 @@ static uint32_t execute_system(CPU *cpu, Memory *mem, DecodedInstruction *instr,
                     (cpu->privilege_mode == PRV_S && (cpu_read_csr(cpu, CSR_MSTATUS) & MSTATUS_TW))) {
                     return trap_enter(cpu, pc, 2, instr->raw); // U never; S only when TW = 0
                 }
-                return pc + instr->length; // a legal NOP: there is nothing to wait for yet
+                // WFI may stall until a locally enabled interrupt is pending (machine.adoc:2718), or just return
+                // (:2705), whatever MIE, SIE and mideleg say. With nothing enabled pending, the only thing that can
+                // still happen is the CLINT timer, so if MTIE is set idle time passes: mtime jumps to mtimecmp. mcycle
+                // does not move (a sleeping hart executes no cycles, zicntr.adoc:100). The interrupt that follows is
+                // taken on the next instruction, with mepc = pc + 4. Devices that raise interrupts on their own
+                // (Milestones 7 and 8) will need to be considered here too.
+                uint32_t enabled = cpu_read_csr(cpu, CSR_MIE);
+                if (!(cpu_read_csr(cpu, CSR_MIP) & enabled) && (enabled & INT_MTI)) {
+                    clint_idle_until_timer(&cpu->clint);
+                }
+                return pc + instr->length;
             } else if (is_sfence_vma) {
                 if (cpu->privilege_mode == PRV_U ||
                     (cpu->privilege_mode == PRV_S && (cpu_read_csr(cpu, CSR_MSTATUS) & MSTATUS_TVM))) {

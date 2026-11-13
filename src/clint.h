@@ -30,6 +30,9 @@ typedef struct Clint {
 // The manual leaves these reset values unspecified (machine.adoc:2771-2790).
 void clint_reset(Clint *c);
 void clint_tick(Clint *c);                    // one cpu cycle
+// Idle time passes (WFI): mtime jumps to mtimecmp and the tick phase restarts. All ones in mtimecmp means no timer is
+// armed, so there is nothing to wait for. Returns true if mtime moved.
+bool clint_idle_until_timer(Clint *c);
 bool clint_timer_pending(const Clint *c);     // MTIP: mtime >= mtimecmp, unsigned (machine.adoc:2521)
 bool clint_software_pending(const Clint *c);  // MSIP
 Device clint_device(Clint *c);                // for mem_add_device
