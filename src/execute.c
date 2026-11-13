@@ -855,11 +855,18 @@ static uint32_t ecall_cause(PrivMode mode) {
 static uint32_t trap_enter(CPU *cpu, uint32_t pc, uint32_t cause, uint32_t tval) {
     cpu->trapped = true; // a trapping instruction does not retire (minstret)
     PrivMode from = cpu->privilege_mode;
-    // A trap taken in M is never delegated. From S or U, a set medeleg bit sends it to S.
-    // (Interrupts have bit 31 set and do not come through here until Milestone 6.)
-    bool to_s = from != PRV_M && cause < 32 && ((cpu_read_csr(cpu, CSR_MEDELEG) >> cause) & 1u);
-    LOG_DEBUG("trap: %s -> %s, cause %u, epc 0x%08x, tval 0x%08x",
-              mode_name(from), to_s ? "S" : "M", cause, pc, tval);
+    // A trap taken in M is never delegated. From S or U, a set medeleg bit (mideleg for an interrupt,
+    // which has bit 31 set in its cause) sends it to S.
+    bool is_interrupt = cause >> 31;
+    uint32_t code = cause & 0x7FFFFFFFu;
+    uint32_t delegated = cpu_read_csr(cpu, is_interrupt ? CSR_MIDELEG : CSR_MEDELEG);
+    bool to_s = from != PRV_M && code < 32 && ((delegated >> code) & 1u);
+    if (is_interrupt) {
+        LOG_DEBUG("trap: %s -> %s, interrupt %u, epc 0x%08x", mode_name(from), to_s ? "S" : "M", code, pc);
+    } else {
+        LOG_DEBUG("trap: %s -> %s, cause %u, epc 0x%08x, tval 0x%08x",
+                  mode_name(from), to_s ? "S" : "M", cause, pc, tval);
+    }
 
     uint32_t mstatus = cpu_read_csr(cpu, CSR_MSTATUS);
     if (to_s) {
@@ -909,6 +916,33 @@ void execute(CPU *cpu, Memory *mem, DecodedInstruction *instr) {
     }
 }
 
+// The interrupt the hart takes before its next instruction, as its code, or false for none. An interrupt
+// is taken to M-mode if the mode is M with MIE set or is below M, the bit is set in mip and mie, and it is
+// not delegated (machine.adoc:1343). A delegated one is taken to S-mode if the mode is S with SIE set or is
+// U (supervisor.adoc:382), and so never in M-mode (machine.adoc:1287). Interrupts to M-mode come first, and
+// within a group the order is MEI, MSI, MTI, SEI, SSI, STI (machine.adoc:1481, supervisor.adoc:486).
+static bool pending_interrupt(CPU *cpu, uint32_t *code) {
+    uint32_t pending = cpu_read_csr(cpu, CSR_MIP) & cpu_read_csr(cpu, CSR_MIE);
+    uint32_t mideleg = cpu_read_csr(cpu, CSR_MIDELEG);
+    uint32_t mstatus = cpu_read_csr(cpu, CSR_MSTATUS);
+    PrivMode mode = cpu->privilege_mode;
+
+    bool to_m_enabled = mode != PRV_M || (mstatus & MSTATUS_MIE);                       // below M: always
+    bool to_s_enabled = mode == PRV_U || (mode == PRV_S && (mstatus & MSTATUS_SIE));    // in M: never
+    uint32_t take = to_m_enabled ? pending & ~mideleg : 0;
+    if (!take && to_s_enabled) {
+        take = pending & mideleg;
+    }
+    static const uint32_t order[] = {11, 3, 7, 9, 1, 5};   // MEI, MSI, MTI, SEI, SSI, STI
+    for (unsigned i = 0; i < sizeof order / sizeof order[0]; i++) {
+        if ((take >> order[i]) & 1u) {
+            *code = order[i];
+            return true;
+        }
+    }
+    return false;
+}
+
 // One 2-byte instruction fetch: translated, PMP-checked and bounds-checked on its own. MPRV does not
 // apply to fetches. On failure returns false with the trap cause: 12 (page fault) or 1 (access fault).
 static bool fetch_halfword(CPU *cpu, Memory *mem, uint32_t va, uint16_t *out, uint32_t *cause) {
@@ -935,7 +969,10 @@ void cpu_step(CPU *cpu, Memory *mem) {
     uint32_t pc = cpu->pc;
     uint16_t low;
     uint32_t cause;
-    if (!fetch_halfword(cpu, mem, pc, &low, &cause)) {
+    uint32_t interrupt;
+    if (pending_interrupt(cpu, &interrupt)) {
+        cpu->pc = trap_enter(cpu, pc, 0x80000000u | interrupt, 0); // mepc is this instruction, not yet executed
+    } else if (!fetch_halfword(cpu, mem, pc, &low, &cause)) {
         cpu->pc = trap_enter(cpu, pc, cause, pc); // instruction page fault or access fault
     } else if ((low & 0x3u) == 0x3u) {        // bits [1:0] = 11: a 32-bit instruction
         uint16_t high;
