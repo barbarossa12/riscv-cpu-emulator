@@ -963,6 +963,7 @@ void cpu_step(CPU *cpu, Memory *mem) {
     if (!cpu->mcycle_written) {
         cpu->mcycle++;
     }
+    clint_tick(&cpu->clint);                  // mtime follows the cpu cycles, whatever software writes to mcycle
     if (!cpu->trapped && !cpu->minstret_written) {
         cpu->minstret++;
     }

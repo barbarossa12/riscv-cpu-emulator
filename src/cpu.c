@@ -11,6 +11,7 @@ static bool mpp_is_legal(uint32_t mpp) {
 void cpu_reset(CPU *cpu) {
 	*cpu = (CPU){0};
 	cpu->privilege_mode = PRV_M;
+	clint_reset(&cpu->clint);
 }
 
 uint32_t cpu_read_reg(CPU *cpu, uint8_t index) {

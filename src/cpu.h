@@ -1,6 +1,7 @@
 #pragma once
 #include <stdint.h>
 #include <stdbool.h>
+#include "clint.h"
 
 #define CSR_MSTATUS  0x300
 #define CSR_MISA      0x301
@@ -121,6 +122,8 @@ typedef struct CPU {
 
 	TlbEntry tlb_4k[TLB_4K_ENTRIES];
 	TlbEntry tlb_mega[TLB_MEGA_ENTRIES];
+
+	Clint    clint;     // the core-local timer and software interrupt, memory-mapped at CLINT_BASE
 
 	bool     lr_valid;  // a load reservation is held (LR.W sets it; any SC.W clears it)
 	uint32_t lr_addr;   // address of the reserved word

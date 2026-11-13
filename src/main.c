@@ -81,6 +81,7 @@ int main(int argc, char **argv) {
 	CPU cpu;
 	cpu_reset(&cpu);
 	cpu.pc = img.entry;
+	mem_add_device(&mem, clint_device(&cpu.clint));
 
 	for (unsigned long long executed = 0; executed < max_instrs; executed++) {
 		cpu_step(&cpu, &mem);
