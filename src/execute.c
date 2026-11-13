@@ -897,10 +897,22 @@ void execute(CPU *cpu, Memory *mem, DecodedInstruction *instr) {
     }
 }
 
-// One 2-byte instruction fetch, PMP-checked and bounds-checked on its own.
-static bool fetch_halfword(CPU *cpu, Memory *mem, uint32_t addr, uint16_t *out) {
-    return pmp_check(cpu, addr, 2, PMP_ACCESS_EXEC, cpu->privilege_mode) &&
-           mem_try_read16(mem, addr, out);
+// One 2-byte instruction fetch: translated, PMP-checked and bounds-checked on its own. MPRV does not
+// apply to fetches. On failure returns false with the trap cause: 12 (page fault) or 1 (access fault).
+static bool fetch_halfword(CPU *cpu, Memory *mem, uint32_t va, uint16_t *out, uint32_t *cause) {
+    uint32_t pa;
+    XlateResult r = mmu_translate(cpu, mem, va, ACCESS_FETCH, cpu->privilege_mode, &pa);
+    if (r == XLATE_PAGE_FAULT) {
+        *cause = 12;                                   // instruction page fault
+        return false;
+    }
+    if (r == XLATE_ACCESS_FAULT ||
+        !pmp_check(cpu, pa, 2, PMP_ACCESS_EXEC, cpu->privilege_mode) ||
+        !mem_try_read16(mem, pa, out)) {
+        *cause = 1;                                    // instruction access fault
+        return false;
+    }
+    return true;
 }
 
 void cpu_step(CPU *cpu, Memory *mem) {
@@ -910,12 +922,13 @@ void cpu_step(CPU *cpu, Memory *mem) {
 
     uint32_t pc = cpu->pc;
     uint16_t low;
-    if (!fetch_halfword(cpu, mem, pc, &low)) {
-        cpu->pc = trap_enter(cpu, pc, 1, pc); // instruction access fault
+    uint32_t cause;
+    if (!fetch_halfword(cpu, mem, pc, &low, &cause)) {
+        cpu->pc = trap_enter(cpu, pc, cause, pc); // instruction page fault or access fault
     } else if ((low & 0x3u) == 0x3u) {        // bits [1:0] = 11: a 32-bit instruction
         uint16_t high;
-        if (!fetch_halfword(cpu, mem, pc + 2, &high)) {
-            cpu->pc = trap_enter(cpu, pc, 1, pc + 2); // mtval is the part that faulted; mepc stays at the start
+        if (!fetch_halfword(cpu, mem, pc + 2, &high, &cause)) {
+            cpu->pc = trap_enter(cpu, pc, cause, pc + 2); // mtval is the part that faulted; mepc stays at the start
         } else {
             DecodedInstruction instr = decode_instruction((uint32_t)high << 16 | low);
             execute(cpu, mem, &instr);
