@@ -100,6 +100,17 @@ typedef enum {
 } PrivMode;
 
 
+// The translation cache (see mmu.c): 4 KiB pages and megapages are kept apart, each direct-mapped
+#define TLB_4K_ENTRIES   64
+#define TLB_MEGA_ENTRIES 16
+
+typedef struct {
+	bool     valid;
+	uint16_t asid;
+	uint32_t vpn;   // va >> 12 for a 4 KiB page, va >> 22 for a megapage
+	uint32_t pte;   // the leaf PTE as the walk left it
+} TlbEntry;
+
 typedef struct CPU {
 	uint32_t regs[32];
 	uint32_t pc;
@@ -107,6 +118,9 @@ typedef struct CPU {
 	uint8_t  pmpcfg[PMP_ENTRIES];    // one config byte per implemented PMP entry
 	uint32_t pmpaddr[PMP_ENTRIES];   // address bits 33:2 of each entry's region
 	PrivMode privilege_mode; // current mode. A zeroed CPU is in U-mode, so call cpu_reset()
+
+	TlbEntry tlb_4k[TLB_4K_ENTRIES];
+	TlbEntry tlb_mega[TLB_MEGA_ENTRIES];
 
 	bool     lr_valid;  // a load reservation is held (LR.W sets it; any SC.W clears it)
 	uint32_t lr_addr;   // address of the reserved word

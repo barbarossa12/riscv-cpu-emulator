@@ -682,7 +682,9 @@ static uint32_t execute_system(CPU *cpu, Memory *mem, DecodedInstruction *instr,
                     (cpu->privilege_mode == PRV_S && (cpu_read_csr(cpu, CSR_MSTATUS) & MSTATUS_TVM))) {
                     return trap_enter(cpu, pc, 2, instr->raw); // U never; S only when TVM = 0
                 }
-                return pc + instr->length; // no translation cache yet, so nothing to fence
+                mmu_flush(cpu, cpu_read_reg(cpu, instr->rs1), cpu_read_reg(cpu, instr->rs2) & 0x1FFu,
+                          instr->rs1 == 0, instr->rs2 == 0);   // "x0" is the register number, not the value
+                return pc + instr->length;
             }
             return trap_enter(cpu, pc, 2, instr->raw); // any other encoding, DRET included, is illegal
         }
