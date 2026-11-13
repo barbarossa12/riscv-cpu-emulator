@@ -70,6 +70,10 @@ add_executable(test_time_csr test_time_csr.c)
 target_link_libraries(test_time_csr PRIVATE riscv_core unity)
 add_test(NAME test_time_csr COMMAND test_time_csr)
 
+add_executable(test_wfi test_wfi.c)
+target_link_libraries(test_wfi PRIVATE riscv_core unity)
+add_test(NAME test_wfi COMMAND test_wfi)
+
 add_executable(test_log test_log.c)
 target_link_libraries(test_log PRIVATE riscv_core unity)
 add_test(NAME test_log COMMAND test_log)
