@@ -58,6 +58,10 @@ add_executable(test_clint test_clint.c)
 target_link_libraries(test_clint PRIVATE riscv_core unity)
 add_test(NAME test_clint COMMAND test_clint)
 
+add_executable(test_interrupt_csrs test_interrupt_csrs.c)
+target_link_libraries(test_interrupt_csrs PRIVATE riscv_core unity)
+add_test(NAME test_interrupt_csrs COMMAND test_interrupt_csrs)
+
 add_executable(test_log test_log.c)
 target_link_libraries(test_log PRIVATE riscv_core unity)
 add_test(NAME test_log COMMAND test_log)

@@ -329,15 +329,15 @@ void test_cpu_sstatus_writes_touch_only_the_s_bits(void) {
 	TEST_ASSERT_EQUAL_UINT32(0x1888, cpu_read_csr(&c, CSR_MSTATUS));
 }
 
-void test_cpu_mie_and_mip_keep_only_the_supervisor_bits(void) {
+void test_cpu_mie_takes_the_machine_and_supervisor_bits_and_mip_only_the_supervisor_bits(void) {
 	CPU c; cpu_reset(&c);
 	cpu_write_csr(&c, CSR_MIE, 0xFFFFFFFF);
 	cpu_write_csr(&c, CSR_MIP, 0xFFFFFFFF);
-	TEST_ASSERT_EQUAL_UINT32(0x222, cpu_read_csr(&c, CSR_MIE));
-	TEST_ASSERT_EQUAL_UINT32(0x222, cpu_read_csr(&c, CSR_MIP));
-	cpu_write_csr(&c, CSR_MIE, 0x888);                // MSIE, MTIE, MEIE: read-only 0 for now
+	TEST_ASSERT_EQUAL_UINT32(0xAAA, cpu_read_csr(&c, CSR_MIE));   // MSIE, MTIE, MEIE and the three S bits
+	TEST_ASSERT_EQUAL_UINT32(0x222, cpu_read_csr(&c, CSR_MIP));   // MSIP, MTIP, MEIP are read-only
+	cpu_write_csr(&c, CSR_MIE, 0x888);
 	cpu_write_csr(&c, CSR_MIP, 0x888);
-	TEST_ASSERT_EQUAL_UINT32(0, cpu_read_csr(&c, CSR_MIE));
+	TEST_ASSERT_EQUAL_UINT32(0x888, cpu_read_csr(&c, CSR_MIE));
 	TEST_ASSERT_EQUAL_UINT32(0, cpu_read_csr(&c, CSR_MIP));
 }
 
@@ -658,7 +658,7 @@ int main(void) {
 	RUN_TEST(test_cpu_counteren_registers_are_independent);
 	RUN_TEST(test_cpu_sstatus_reads_the_s_view_of_mstatus);
 	RUN_TEST(test_cpu_sstatus_writes_touch_only_the_s_bits);
-	RUN_TEST(test_cpu_mie_and_mip_keep_only_the_supervisor_bits);
+	RUN_TEST(test_cpu_mie_takes_the_machine_and_supervisor_bits_and_mip_only_the_supervisor_bits);
 	RUN_TEST(test_cpu_sie_and_sip_show_only_delegated_interrupts);
 	RUN_TEST(test_cpu_sie_writes_touch_only_delegated_bits);
 	RUN_TEST(test_cpu_sip_writes_touch_only_ssip);
