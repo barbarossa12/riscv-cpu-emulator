@@ -39,6 +39,20 @@ void cpu_write_reg(CPU *cpu, uint8_t index, uint32_t value) {
 	cpu->regs[index] = value;
 }
 
+// The machine-level interrupts the platform is asserting. MEIP stays 0 until the PLIC exists (Milestone 8),
+// and then the supervisor external interrupt read of mip must also OR in the controller's signal
+// (machine.adoc:1436-1441).
+static uint32_t cpu_platform_pending(const CPU *cpu) {
+	uint32_t lines = 0;
+	if (clint_timer_pending(&cpu->clint)) {
+		lines |= INT_MTI;
+	}
+	if (clint_software_pending(&cpu->clint)) {
+		lines |= INT_MSI;
+	}
+	return lines;
+}
+
 uint32_t cpu_read_csr(CPU *cpu, uint16_t addr){
 	if(addr > 0xFFF) {
 		LOG_FATAL("CPU CSR register value larger than 0xFFF: 0x%x", addr);
@@ -53,6 +67,8 @@ uint32_t cpu_read_csr(CPU *cpu, uint16_t addr){
 			return cpu->csr[CSR_MIE] & cpu->csr[CSR_MIDELEG] & INT_S_ALL;
 		case CSR_SIP:
 			return cpu->csr[CSR_MIP] & cpu->csr[CSR_MIDELEG] & INT_S_ALL;
+		case CSR_MIP:   // the stored supervisor bits, and the machine bits as the platform drives them
+			return cpu->csr[CSR_MIP] | cpu_platform_pending(cpu);
 		case CSR_MSTATUSH:
 		case CSR_MEDELEGH:
 			return 0;
@@ -129,8 +145,10 @@ void cpu_write_csr(CPU *cpu, uint16_t addr, uint32_t value) {
 			cpu->csr[addr] = new_val;
 			return;
 		}
-		case CSR_MIE:   // MSIE/MTIE/MEIE are read-only 0 until their sources exist (Milestones 6, 8)
-		case CSR_MIP:   // MSIP/MTIP/MEIP are set by the platform, so absent until then
+		case CSR_MIE:
+			cpu->csr[addr] = value & (INT_S_ALL | INT_M_ALL);
+			return;
+		case CSR_MIP:   // MSIP/MTIP/MEIP are read-only: the platform sets them
 			cpu->csr[addr] = value & INT_S_ALL;
 			return;
 		case CSR_SSTATUS:

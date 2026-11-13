@@ -67,6 +67,13 @@
 #define INT_SEI   (1u << 9)
 #define INT_S_ALL (INT_SSI | INT_STI | INT_SEI)   // 0x222
 
+// Machine interrupt bits: MSIP, MTIP and MEIP are read-only in mip and set by the platform
+// (machine.adoc:1400-1410); MSIE, MTIE and MEIE in mie are writable
+#define INT_MSI   (1u << 3)
+#define INT_MTI   (1u << 7)
+#define INT_MEI   (1u << 11)
+#define INT_M_ALL (INT_MSI | INT_MTI | INT_MEI)   // 0x888
+
 #define MSTATUS_SIE  (1u << 1)
 #define MSTATUS_MIE  (1u << 3)
 #define MSTATUS_SPIE (1u << 5)
