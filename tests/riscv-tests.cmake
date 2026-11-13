@@ -100,7 +100,8 @@ if(RISCV_TESTS)
 
     # Assembly tests of our own (tests/asm), built like the rv32mi tests and run like them.
     set(_asm_sources ${CMAKE_SOURCE_DIR}/tests/asm/pmp_denial.S
-                     ${CMAKE_SOURCE_DIR}/tests/asm/sv32_flow.S)
+                     ${CMAKE_SOURCE_DIR}/tests/asm/sv32_flow.S
+                     ${CMAKE_SOURCE_DIR}/tests/asm/clint_mmio.S)
     add_test(NAME riscv-tests.build-asm
              COMMAND "${CMAKE_SOURCE_DIR}/scripts/build-asm-tests.sh"
                      "${RISCV_TESTS_SRC_DIR}" "${RISCV_TESTS_BUILD_DIR}" ${_asm_sources})
@@ -121,6 +122,12 @@ if(RISCV_TESTS)
     add_test(NAME riscv-tests.sv32-flow
              COMMAND riscv_emu "${RISCV_TESTS_BUILD_DIR}/sv32_flow")
     set_tests_properties(riscv-tests.sv32-flow PROPERTIES
+        FIXTURES_REQUIRED riscv-tests-elfs TIMEOUT 60 LABELS riscv-tests)
+
+    # The CLINT through the real emulator: reset values, msip, and mtime counting cycles exactly.
+    add_test(NAME riscv-tests.clint-mmio
+             COMMAND riscv_emu "${RISCV_TESTS_BUILD_DIR}/clint_mmio")
+    set_tests_properties(riscv-tests.clint-mmio PROPERTIES
         FIXTURES_REQUIRED riscv-tests-elfs TIMEOUT 60 LABELS riscv-tests)
 
     foreach(name ${_names})

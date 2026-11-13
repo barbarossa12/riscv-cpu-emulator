@@ -54,6 +54,10 @@ add_executable(test_bus test_bus.c)
 target_link_libraries(test_bus PRIVATE riscv_core unity)
 add_test(NAME test_bus COMMAND test_bus)
 
+add_executable(test_clint test_clint.c)
+target_link_libraries(test_clint PRIVATE riscv_core unity)
+add_test(NAME test_clint COMMAND test_clint)
+
 add_executable(test_log test_log.c)
 target_link_libraries(test_log PRIVATE riscv_core unity)
 add_test(NAME test_log COMMAND test_log)
