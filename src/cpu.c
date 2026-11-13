@@ -80,6 +80,10 @@ uint32_t cpu_read_csr(CPU *cpu, uint16_t addr){
 		case CSR_MCYCLEH:
 		case CSR_CYCLEH:
 			return (uint32_t)(cpu->mcycle >> 32);
+		case CSR_TIME:    // read-only shadows of the CLINT's mtime (machine.adoc:1598-1603)
+			return (uint32_t)cpu->clint.mtime;
+		case CSR_TIMEH:
+			return (uint32_t)(cpu->clint.mtime >> 32);
 		case CSR_MINSTRET:
 		case CSR_INSTRET:
 			return (uint32_t)cpu->minstret;
@@ -113,8 +117,10 @@ void cpu_write_csr(CPU *cpu, uint16_t addr, uint32_t value) {
 		case CSR_TDATA1:
 		case CSR_TDATA2:
 			return;
-		case CSR_CYCLE:   // read-only shadows of the machine counters
+		case CSR_CYCLE:   // read-only shadows of the machine counters and of mtime
 		case CSR_CYCLEH:
+		case CSR_TIME:
+		case CSR_TIMEH:
 		case CSR_INSTRET:
 		case CSR_INSTRETH:
 			return;

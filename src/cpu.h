@@ -49,17 +49,20 @@
 #define CSR_INSTRET   0xC02
 #define CSR_CYCLEH    0xC80
 #define CSR_INSTRETH  0xC82
+#define CSR_TIME      0xC01   // read-only shadow of the low half of the CLINT's mtime
+#define CSR_TIMEH     0xC81   // read-only shadow of the high half
 
 // MXL=1 (RV32) in bits 31:30, plus A (bit 0), C (bit 2), I (bit 8), M (bit 12), S-mode (bit 18) and U-mode (bit 20)
 #define MISA_VALUE    0x40141105u
 
-// Counter-enable CSRs. Only the CY and IR bits exist: TM is absent until `time` exists
-// (Milestone 6) and there are no hpmcounters, so every other bit is read-only 0.
+// Counter-enable CSRs. Only the CY, TM and IR bits exist: there are no hpmcounters, so every other bit
+// is read-only 0.
 #define CSR_SCOUNTEREN 0x106
 #define CSR_MCOUNTEREN 0x306
 #define COUNTEREN_CY (1u << 0)
+#define COUNTEREN_TM (1u << 1)
 #define COUNTEREN_IR (1u << 2)
-#define COUNTEREN_WRITABLE (COUNTEREN_CY | COUNTEREN_IR)
+#define COUNTEREN_WRITABLE (COUNTEREN_CY | COUNTEREN_TM | COUNTEREN_IR)
 
 // Supervisor interrupt bits, the same positions in mip, mie, sip and sie
 #define INT_SSI   (1u << 1)

@@ -767,6 +767,7 @@ static bool csr_exists(uint16_t csr_addr) {
         case CSR_MVENDORID: case CSR_MARCHID: case CSR_MIMPID: case CSR_MHARTID:
         case CSR_MCYCLE: case CSR_MINSTRET: case CSR_MCYCLEH: case CSR_MINSTRETH:
         case CSR_CYCLE: case CSR_INSTRET: case CSR_CYCLEH: case CSR_INSTRETH:
+        case CSR_TIME: case CSR_TIMEH:
         case CSR_MCOUNTEREN: case CSR_SCOUNTEREN:
         case CSR_SSTATUS: case CSR_SIE: case CSR_STVEC: case CSR_SSCRATCH:
         case CSR_SEPC: case CSR_SCAUSE: case CSR_STVAL: case CSR_SIP: case CSR_SATP:
@@ -783,12 +784,13 @@ static bool csr_privilege_ok(PrivMode mode, uint16_t csr_addr) {
     return (uint32_t)mode >= ((csr_addr >> 8) & 0x3u);
 }
 
-// cycle/instret and their h halves: S-mode needs the mcounteren bit, U-mode needs both the
-// mcounteren and the scounteren bit. M-mode is never gated.
+// cycle, time and instret and their h halves: S-mode needs the mcounteren bit, U-mode needs both the
+// mcounteren and the scounteren bit (machine.adoc:1571, supervisor.adoc:510). M-mode is never gated.
 static bool counter_access_ok(CPU *cpu, PrivMode mode, uint16_t csr_addr) {
     uint32_t bit;
     switch (csr_addr) {
         case CSR_CYCLE:   case CSR_CYCLEH:   bit = COUNTEREN_CY; break;
+        case CSR_TIME:    case CSR_TIMEH:    bit = COUNTEREN_TM; break;
         case CSR_INSTRET: case CSR_INSTRETH: bit = COUNTEREN_IR; break;
         default: return true;
     }
