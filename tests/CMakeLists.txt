@@ -50,6 +50,10 @@ add_executable(test_mmu_tlb test_mmu_tlb.c)
 target_link_libraries(test_mmu_tlb PRIVATE riscv_core unity)
 add_test(NAME test_mmu_tlb COMMAND test_mmu_tlb)
 
+add_executable(test_bus test_bus.c)
+target_link_libraries(test_bus PRIVATE riscv_core unity)
+add_test(NAME test_bus COMMAND test_bus)
+
 add_executable(test_log test_log.c)
 target_link_libraries(test_log PRIVATE riscv_core unity)
 add_test(NAME test_log COMMAND test_log)
@@ -122,3 +126,22 @@ set_tests_properties(test_cpu_csr_oob PROPERTIES
 )
 
 include(riscv-tests.cmake)
+
+# Device registration aborts: overlapping RAM, overlapping another device, an empty device, and one
+# device too many. Each is a standalone executable that must die with the right message.
+foreach(bus_test
+        test_bus_overlap_ram
+        test_bus_overlap_device
+        test_bus_zero_size
+        test_bus_too_many)
+    add_executable(${bus_test} ${bus_test}.c)
+    target_link_libraries(${bus_test} PRIVATE riscv_core)
+    add_test(
+        NAME ${bus_test}
+        COMMAND ${CMAKE_COMMAND} -E env $<TARGET_FILE:${bus_test}>
+    )
+endforeach()
+set_tests_properties(test_bus_overlap_ram PROPERTIES PASS_REGULAR_EXPRESSION "overlaps RAM")
+set_tests_properties(test_bus_overlap_device PROPERTIES PASS_REGULAR_EXPRESSION "overlaps the device")
+set_tests_properties(test_bus_zero_size PROPERTIES PASS_REGULAR_EXPRESSION "bad size")
+set_tests_properties(test_bus_too_many PROPERTIES PASS_REGULAR_EXPRESSION "too many devices")
