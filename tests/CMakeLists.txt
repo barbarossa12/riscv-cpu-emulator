@@ -62,6 +62,10 @@ add_executable(test_interrupt_csrs test_interrupt_csrs.c)
 target_link_libraries(test_interrupt_csrs PRIVATE riscv_core unity)
 add_test(NAME test_interrupt_csrs COMMAND test_interrupt_csrs)
 
+add_executable(test_interrupts test_interrupts.c)
+target_link_libraries(test_interrupts PRIVATE riscv_core unity)
+add_test(NAME test_interrupts COMMAND test_interrupts)
+
 add_executable(test_log test_log.c)
 target_link_libraries(test_log PRIVATE riscv_core unity)
 add_test(NAME test_log COMMAND test_log)
