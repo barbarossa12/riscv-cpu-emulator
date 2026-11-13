@@ -1,7 +1,7 @@
 # clint_mmio.S
 #-----------------------------------------------------------------------------
 #
-# The CLINT through the real emulator (main.c registers it): reset values, and mtime counting cycles
+# The CLINT through the real emulator (main.c registers it): reset values, and mtime and time counting cycles
 # deterministically. mtime ticks once per 10 cpu cycles, one cycle per instruction step, so between two
 # loads of mtime that are a multiple of 10 steps apart it advances by exactly steps / 10, whatever the
 # phase was at the first load.
@@ -67,6 +67,19 @@ RVTEST_CODE_BEGIN
   # the high half has not moved
   li TESTNUM, 6
   lw t1, 4(t0)
+  bnez t1, fail
+
+  # rdtime reads the same counter: 100 steps apart, exactly 10 ticks. The window is the rdtime and 99 nops.
+  li TESTNUM, 7
+  rdtime t1
+  .rept 99
+  nop
+  .endr
+  rdtime t2
+  sub t3, t2, t1
+  li t4, 10
+  bne t3, t4, fail
+  rdtimeh t1
   bnez t1, fail
 
   TEST_PASSFAIL

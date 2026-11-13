@@ -101,9 +101,11 @@ void test_cpu_counteren_writable_bits(void) {
 		{0x00000001, 0x00000001}, // CY
 		{0x00000004, 0x00000004}, // IR
 		{0x00000005, 0x00000005}, // CY | IR
-		{0x00000002, 0x00000000}, // TM: read-only 0 until Milestone 6
-		{0xFFFFFFF8, 0x00000000}, // TM and HPM3..31: read-only 0
-		{0xFFFFFFFF, 0x00000005},
+		{0x00000002, 0x00000002}, // TM: writable since the time CSR exists
+		{0x00000006, 0x00000006}, // TM | IR
+		{0x00000003, 0x00000003}, // CY | TM
+		{0xFFFFFFF8, 0x00000000}, // HPM3..31: read-only 0
+		{0xFFFFFFFF, 0x00000007},
 	};
 	const uint16_t csrs[] = {CSR_MCOUNTEREN, CSR_SCOUNTEREN};
 	for (unsigned c = 0; c < 2; c++) {
