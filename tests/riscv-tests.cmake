@@ -101,7 +101,11 @@ if(RISCV_TESTS)
     # Assembly tests of our own (tests/asm), built like the rv32mi tests and run like them.
     set(_asm_sources ${CMAKE_SOURCE_DIR}/tests/asm/pmp_denial.S
                      ${CMAKE_SOURCE_DIR}/tests/asm/sv32_flow.S
-                     ${CMAKE_SOURCE_DIR}/tests/asm/clint_mmio.S)
+                     ${CMAKE_SOURCE_DIR}/tests/asm/clint_mmio.S
+                     ${CMAKE_SOURCE_DIR}/tests/asm/timer_interrupt.S
+                     ${CMAKE_SOURCE_DIR}/tests/asm/wfi_idle.S
+                     ${CMAKE_SOURCE_DIR}/tests/asm/sbi_timer.S
+                     ${CMAKE_SOURCE_DIR}/tests/asm/time_gating.S)
     add_test(NAME riscv-tests.build-asm
              COMMAND "${CMAKE_SOURCE_DIR}/scripts/build-asm-tests.sh"
                      "${RISCV_TESTS_SRC_DIR}" "${RISCV_TESTS_BUILD_DIR}" ${_asm_sources})
@@ -129,6 +133,16 @@ if(RISCV_TESTS)
              COMMAND riscv_emu "${RISCV_TESTS_BUILD_DIR}/clint_mmio")
     set_tests_properties(riscv-tests.clint-mmio PROPERTIES
         FIXTURES_REQUIRED riscv-tests-elfs TIMEOUT 60 LABELS riscv-tests)
+
+    # Timer interrupts, WFI idling, the OpenSBI-style machine-to-supervisor timer flow, and the time CSR's gate,
+    # all on the real emulator with its virtual, deterministic mtime.
+    foreach(timer_test timer-interrupt wfi-idle sbi-timer time-gating)
+        string(REPLACE "-" "_" timer_elf ${timer_test})
+        add_test(NAME riscv-tests.${timer_test}
+                 COMMAND riscv_emu "${RISCV_TESTS_BUILD_DIR}/${timer_elf}")
+        set_tests_properties(riscv-tests.${timer_test} PROPERTIES
+            FIXTURES_REQUIRED riscv-tests-elfs TIMEOUT 60 LABELS riscv-tests)
+    endforeach()
 
     foreach(name ${_names})
         add_test(NAME riscv-tests.${name}
