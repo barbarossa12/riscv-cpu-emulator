@@ -834,6 +834,193 @@ void test_j30_timeout_survives_reset_and_defaults(void) {
     TEST_ASSERT_EQUAL_HEX32(0xCC, reg(UART_IIR));
 }
 
+/* ---- K. The interrupt output line ---------------------------------------------------------------- */
+
+static bool line(void) { return uart_interrupt_pending(&uart); }
+
+void test_k1_reset_line_low(void) { TEST_ASSERT_FALSE(line()); }
+
+void test_k2_each_source_raises_when_enabled(void) {
+    put(UART_IER, UART_IER_ELSI);   uart_receive(&uart, 1); uart_receive(&uart, 2);
+    TEST_ASSERT_TRUE(line());                                // overrun
+    uart_reset(&uart);
+    put(UART_IER, UART_IER_ERBFI);  uart_receive(&uart, 1);
+    TEST_ASSERT_TRUE(line());                                // data
+    uart_reset(&uart);
+    put(UART_IER, UART_IER_ETBEI);
+    TEST_ASSERT_TRUE(line());                                // THRE
+    uart_reset(&uart);
+    put(UART_IER, UART_IER_EDSSI);  put(UART_MCR, UART_MCR_LOOP);
+    TEST_ASSERT_TRUE(line());                                // modem status
+}
+
+void test_k3_disabled_sources_keep_it_low(void) {
+    uart_receive(&uart, 1); uart_receive(&uart, 2);          // overrun and data
+    put(UART_THR, 0x41);                                     // THRE latch
+    put(UART_MCR, UART_MCR_LOOP);                            // modem change (and the looped byte)
+    put(UART_IER, 0x00);
+    TEST_ASSERT_FALSE(line());
+}
+
+void test_k4_service_actions_lower_it(void) {
+    put(UART_IER, UART_IER_ELSI);   uart_receive(&uart, 1); uart_receive(&uart, 2);
+    TEST_ASSERT_TRUE(line());       (void)reg(UART_LSR);     TEST_ASSERT_FALSE(line());
+    uart_reset(&uart);
+    put(UART_IER, UART_IER_ERBFI);  uart_receive(&uart, 1);
+    TEST_ASSERT_TRUE(line());       (void)reg(UART_RBR);     TEST_ASSERT_FALSE(line());
+    uart_reset(&uart);
+    put(UART_IER, UART_IER_ETBEI);
+    TEST_ASSERT_TRUE(line());       (void)reg(UART_IIR);     TEST_ASSERT_FALSE(line());
+    uart_reset(&uart);
+    put(UART_IER, UART_IER_EDSSI);  put(UART_MCR, UART_MCR_LOOP);
+    TEST_ASSERT_TRUE(line());       (void)reg(UART_MSR);     TEST_ASSERT_FALSE(line());
+}
+
+void test_k5_thr_write_keeps_thre_line_high(void) {
+    put(UART_IER, UART_IER_ETBEI);
+    (void)reg(UART_IIR);
+    TEST_ASSERT_FALSE(line());
+    put(UART_THR, 0x41);                                     // instant transmit: THRE is set again at once
+    TEST_ASSERT_TRUE(line());
+    (void)reg(UART_IIR);
+    TEST_ASSERT_FALSE(line());
+}
+
+void test_k6_two_sources_line_follows_the_last(void) {
+    put(UART_IER, UART_IER_ELSI | UART_IER_ERBFI);
+    uart_receive(&uart, 1); uart_receive(&uart, 2);          // overrun and one byte of data
+    TEST_ASSERT_EQUAL_HEX32(0x06, reg(UART_IIR) & 0x0F);
+    (void)reg(UART_LSR);                                     // the higher one is serviced
+    TEST_ASSERT_TRUE(line());
+    (void)reg(UART_RBR);
+    TEST_ASSERT_FALSE(line());
+}
+
+void test_k7_level_follows_ier(void) {
+    uart_receive(&uart, 1);
+    put(UART_IER, UART_IER_ERBFI);
+    TEST_ASSERT_TRUE(line());
+    put(UART_IER, 0x00);
+    TEST_ASSERT_FALSE(line());
+    put(UART_IER, UART_IER_ERBFI);
+    TEST_ASSERT_TRUE(line());
+}
+
+// The oracle for the sweep, written independently of iir_cause: the IIR low nibble for a set of pending sources
+static unsigned oracle(unsigned ier, unsigned pend) {
+    if ((ier & 4) && (pend & 1)) return 0x6;                 // line status (overrun)
+    if ((ier & 1) && (pend & 2)) return 0x4;                 // received data
+    if ((ier & 2) && (pend & 4)) return 0x2;                 // THRE
+    if ((ier & 8) && (pend & 8)) return 0x0;                 // modem status
+    return 0x1;
+}
+
+void test_k8_exhaustive_sweep(void) {
+    for (unsigned ier = 0; ier < 16; ier++) {
+        for (unsigned pend = 0; pend < 16; pend++) {
+            uart_reset(&uart);
+            uart.ier = (uint8_t)ier;                         // set the state directly, bypassing the edge rules
+            uart.rx_overrun   = pend & 1;
+            uart.rx_count     = (pend & 2) ? 1 : 0;
+            uart.thre_pending = pend & 4;
+            uart.msr_delta    = (pend & 8) ? UART_MSR_DCTS : 0;
+            unsigned want = oracle(ier, pend);
+            TEST_ASSERT_EQUAL_MESSAGE(want != 1, line(), "line");
+            TEST_ASSERT_EQUAL_HEX32_MESSAGE(want, reg(UART_IIR) & 0x0F, "iir");
+        }
+    }
+}
+
+void test_k9_trigger_level_and_timeout_edges(void) {
+    put(UART_IER, UART_IER_ERBFI);
+    fifo_on(1);                                              // trigger 4
+    feed(3, 0);
+    TEST_ASSERT_FALSE(line());
+    feed(1, 3);
+    TEST_ASSERT_TRUE(line());
+    uart_reset(&uart);
+    put(UART_IER, UART_IER_ERBFI);
+    fifo_on(2);                                              // trigger 8
+    uart_receive(&uart, 1);
+    ticks(UART_TIMEOUT_CYCLES - 1);
+    TEST_ASSERT_FALSE(line());
+    ticks(1);
+    TEST_ASSERT_TRUE(line());
+}
+
+void test_k10_loopback_lines(void) {
+    put(UART_IER, UART_IER_ERBFI | UART_IER_ETBEI | UART_IER_EDSSI);
+    (void)reg(UART_IIR);
+    put(UART_MCR, UART_MCR_LOOP);                            // modem change
+    TEST_ASSERT_TRUE(line());
+    (void)reg(UART_MSR);
+    TEST_ASSERT_FALSE(line());
+    put(UART_THR, 0x41);                                     // looped back: data, and THRE re-armed
+    TEST_ASSERT_EQUAL_HEX32(0x04, reg(UART_IIR) & 0x0F);
+    (void)reg(UART_RBR);
+    TEST_ASSERT_EQUAL_HEX32(0x02, reg(UART_IIR) & 0x0F);
+    TEST_ASSERT_FALSE(line());
+}
+
+void test_k11_out2_does_not_gate(void) {
+    for (int out2 = 0; out2 < 2; out2++) {
+        uart_reset(&uart);
+        put(UART_MCR, out2 ? UART_MCR_OUT2 : 0);
+        put(UART_IER, UART_IER_ERBFI);
+        uart_receive(&uart, 1);
+        TEST_ASSERT_TRUE(line());
+    }
+}
+
+void test_k12_query_has_no_side_effects(void) {
+    uart.ier = 0x0F;
+    uart.rx_overrun = true;
+    uart.thre_pending = true;
+    uart.msr_delta = 0x0B;
+    for (int i = 0; i < 3; i++) TEST_ASSERT_TRUE(line());
+    TEST_ASSERT_TRUE(uart.rx_overrun);
+    TEST_ASSERT_TRUE(uart.thre_pending);
+    TEST_ASSERT_EQUAL_HEX8(0x0B, uart.msr_delta);
+}
+
+void test_k13_dlab_does_not_matter(void) {
+    put(UART_IER, UART_IER_ERBFI);
+    uart_receive(&uart, 1);
+    put(UART_LCR, UART_LCR_DLAB);
+    TEST_ASSERT_TRUE(line());
+    put(UART_LCR, 0);
+    TEST_ASSERT_TRUE(line());
+}
+
+void test_k14_reset_lowers_everything(void) {
+    uart.ier = 0x0F;
+    uart.rx_overrun = true;
+    uart.rx_count = 3;
+    uart.thre_pending = true;
+    uart.msr_delta = 0x0B;
+    uart_reset(&uart);
+    uart.ier = 0x0F;                                         // enable every source again, state set directly
+    TEST_ASSERT_FALSE(line());
+    TEST_ASSERT_FALSE(uart.rx_overrun);
+    TEST_ASSERT_EQUAL_UINT(0, uart.rx_count);
+    TEST_ASSERT_FALSE(uart.thre_pending);
+    TEST_ASSERT_EQUAL_HEX8(0, uart.msr_delta);
+}
+
+void test_k15_fcr_changes_move_the_line(void) {
+    put(UART_IER, UART_IER_ETBEI);
+    (void)reg(UART_IIR);
+    TEST_ASSERT_FALSE(line());
+    put(UART_FCR, 0x01);                                     // bit 0 changed: THRE re-armed
+    TEST_ASSERT_TRUE(line());
+    (void)reg(UART_IIR);
+    put(UART_IER, UART_IER_ERBFI);
+    uart_receive(&uart, 1);
+    TEST_ASSERT_TRUE(line());
+    put(UART_FCR, 0x03);                                     // clear the receive FIFO
+    TEST_ASSERT_FALSE(line());
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_a1_reset_values);
@@ -927,5 +1114,20 @@ int main(void) {
     RUN_TEST(test_j29_adjustable_timeout);
     RUN_TEST(test_j30_timeout_survives_reset_and_defaults);
     RUN_TEST(test_j31_old_trigger_does_not_apply_without_fifos);
+    RUN_TEST(test_k1_reset_line_low);
+    RUN_TEST(test_k2_each_source_raises_when_enabled);
+    RUN_TEST(test_k3_disabled_sources_keep_it_low);
+    RUN_TEST(test_k4_service_actions_lower_it);
+    RUN_TEST(test_k5_thr_write_keeps_thre_line_high);
+    RUN_TEST(test_k6_two_sources_line_follows_the_last);
+    RUN_TEST(test_k7_level_follows_ier);
+    RUN_TEST(test_k8_exhaustive_sweep);
+    RUN_TEST(test_k9_trigger_level_and_timeout_edges);
+    RUN_TEST(test_k10_loopback_lines);
+    RUN_TEST(test_k11_out2_does_not_gate);
+    RUN_TEST(test_k12_query_has_no_side_effects);
+    RUN_TEST(test_k13_dlab_does_not_matter);
+    RUN_TEST(test_k14_reset_lowers_everything);
+    RUN_TEST(test_k15_fcr_changes_move_the_line);
     return UNITY_END();
 }
