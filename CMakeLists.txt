@@ -25,6 +25,7 @@ add_library(riscv_core
     src/mmu.c
     src/clint.c
     src/uart.c
+    src/uart_host.c
     src/decode.c
     src/compressed.c
     src/execute.c
