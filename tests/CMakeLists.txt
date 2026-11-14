@@ -179,3 +179,7 @@ set_tests_properties(test_bus_overlap_ram PROPERTIES PASS_REGULAR_EXPRESSION "ov
 set_tests_properties(test_bus_overlap_device PROPERTIES PASS_REGULAR_EXPRESSION "overlaps the device")
 set_tests_properties(test_bus_zero_size PROPERTIES PASS_REGULAR_EXPRESSION "bad size")
 set_tests_properties(test_bus_too_many PROPERTIES PASS_REGULAR_EXPRESSION "too many devices")
+
+add_executable(test_plic_cpu test_plic_cpu.c)
+target_link_libraries(test_plic_cpu PRIVATE riscv_core unity)
+add_test(NAME test_plic_cpu COMMAND test_plic_cpu)
