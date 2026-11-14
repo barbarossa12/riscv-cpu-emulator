@@ -9,6 +9,7 @@
 #include "elf.h"
 #include "log.h"
 #include "uart.h"
+#include "plic.h"
 #include "uart_host.h"
 
 #define RAM_BASE              0x80000000u
@@ -21,6 +22,12 @@
 #define EXIT_TEST_FAIL        1
 #define EXIT_TEST_TIMEOUT     2
 #define EXIT_LOAD_ERROR       3
+
+/* The UART's interrupt output is PLIC source 10 (QEMU virt numbering; the device tree says so in Milestone 9). */
+#define UART_PLIC_SOURCE 10u
+static bool uart_line(void *uart) {
+	return uart_interrupt_pending(uart);
+}
 
 static int usage(const char *prog) {
 	fprintf(stderr, "usage: %s <program.elf> [max-instructions]\n", prog);
@@ -87,6 +94,7 @@ int main(int argc, char **argv) {
 	cpu_reset(&cpu);
 	cpu.pc = img.entry;
 	mem_add_device(&mem, clint_device(&cpu.clint));
+	mem_add_device(&mem, plic_device(&cpu.plic));
 
 	/* The UART: output to stdout (flushed per byte on a terminal), input from stdin only when
 	 * RISCV_EMU_UART_STDIN is set, so ordinary runs stay deterministic. RISCV_EMU_UART_TIMEOUT sets
@@ -102,6 +110,7 @@ int main(int argc, char **argv) {
 		else fprintf(stderr, "%s: ignoring RISCV_EMU_UART_TIMEOUT=%s (use a number of cpu steps)\n", argv[0], timeout_env);
 	}
 	mem_add_device(&mem, uart_device(&uart));
+	plic_set_source(&cpu.plic, UART_PLIC_SOURCE, uart_line, &uart);   // PLIC source 10, as the device tree will say
 	HostInput uart_in;
 	host_input_init(&uart_in, getenv("RISCV_EMU_UART_STDIN") ? STDIN_FILENO : -1);
 
