@@ -22,7 +22,13 @@ typedef struct Device {
 	bool (*write)(void *ctx, uint32_t offset, uint32_t size, uint32_t value);
 	void *ctx;
 	void (*tick)(void *ctx);   // optional: called once per cpu step, for devices that count cycles
+	// optional, for a device whose interrupt line can change by itself as time passes. WFI lets idle time pass: it asks
+	// for the cycles until the earliest such change (MEM_IDLE_NEVER if none) and then advances the device by that many
+	// cycles (never past its own horizon), with no instruction executed. One cycle is one cpu step, not mcycle.
+	uint64_t (*idle_horizon)(void *ctx);
+	void (*idle)(void *ctx, uint64_t cycles);
 } Device;
+#define MEM_IDLE_NEVER UINT64_MAX
 
 typedef struct Memory {
 	uint8_t *buffer;
@@ -64,3 +70,5 @@ bool mem_bus_read(Memory *mem, uint32_t addr, uint32_t size, uint32_t *out);   /
 bool mem_bus_write(Memory *mem, uint32_t addr, uint32_t size, uint32_t val);   // size 1 to 4
 bool mem_bus_writable(Memory *mem, uint32_t addr, uint32_t size); // like a write, but touches nothing
 void mem_tick(Memory *mem);                   // calls tick on every device that has one
+uint64_t mem_idle_horizon(const Memory *mem); // the smallest idle_horizon of any device, MEM_IDLE_NEVER if none
+void mem_idle(Memory *mem, uint64_t cycles);  // idle time passes: calls idle on every device that has one

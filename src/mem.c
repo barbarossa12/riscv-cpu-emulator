@@ -227,3 +227,20 @@ void mem_tick(Memory *mem) {
 		if (mem->devices[i].tick) mem->devices[i].tick(mem->devices[i].ctx);
 	}
 }
+
+uint64_t mem_idle_horizon(const Memory *mem) {
+	uint64_t horizon = MEM_IDLE_NEVER;
+	for (int i = 0; i < mem->device_count; i++) {
+		if (mem->devices[i].idle_horizon) {
+			uint64_t h = mem->devices[i].idle_horizon(mem->devices[i].ctx);
+			if (h < horizon) horizon = h;
+		}
+	}
+	return horizon;
+}
+
+void mem_idle(Memory *mem, uint64_t cycles) {
+	for (int i = 0; i < mem->device_count; i++) {
+		if (mem->devices[i].idle) mem->devices[i].idle(mem->devices[i].ctx, cycles);
+	}
+}
