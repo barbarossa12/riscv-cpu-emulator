@@ -62,6 +62,12 @@ add_executable(test_uart test_uart.c)
 target_link_libraries(test_uart PRIVATE riscv_core unity)
 add_test(NAME test_uart COMMAND test_uart)
 
+add_executable(test_uart_host test_uart_host.c)
+target_link_libraries(test_uart_host PRIVATE riscv_core unity)
+add_test(NAME test_uart_host COMMAND test_uart_host)
+# A bug in the non-blocking poll would hang rather than fail, so give it a short timeout
+set_tests_properties(test_uart_host PROPERTIES TIMEOUT 30)
+
 add_executable(test_interrupt_csrs test_interrupt_csrs.c)
 target_link_libraries(test_interrupt_csrs PRIVATE riscv_core unity)
 add_test(NAME test_interrupt_csrs COMMAND test_interrupt_csrs)
