@@ -28,6 +28,6 @@ mkdir -p "$out"
 for f in "$@"; do
 	name=$(basename "$f" .S)
 	"$gcc" -march=rv32g -mabi=ilp32 -static -mcmodel=medany -fvisibility=hidden -nostdlib -nostartfiles \
-		-I"$src/env/p" -I"$src/isa/macros/scalar" -T"$src/env/p/link.ld" "$f" -o "$out/$name"
+		-I"$(dirname "$f")" -I"$src/env/p" -I"$src/isa/macros/scalar" -T"$src/env/p/link.ld" "$f" -o "$out/$name"
 done
 echo "built $# assembly tests in $out"
