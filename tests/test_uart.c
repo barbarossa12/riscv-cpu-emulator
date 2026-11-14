@@ -176,8 +176,8 @@ void test_d5_clear_bits_are_accepted(void) {
     TEST_ASSERT_EQUAL_HEX32(0xC1, reg(UART_IIR));
 }
 
-void test_d6_ier_alone_raises_nothing(void) {
-    put(UART_IER, 0x0F);
+void test_d6_ier_without_etbei_raises_nothing(void) {
+    put(UART_IER, 0x0D);                       // everything but the THRE interrupt
     TEST_ASSERT_EQUAL_HEX32(0x01, reg(UART_IIR));
     put(UART_FCR, 0x01);
     TEST_ASSERT_EQUAL_HEX32(0xC1, reg(UART_IIR));
@@ -351,6 +351,158 @@ void test_h5_device_description(void) {
     TEST_ASSERT_EQUAL_HEX32(0x100, d.size);
 }
 
+/* ---- I. Transmit and the THRE interrupt --------------------------------------------------------- */
+
+static uint8_t sent[64];
+static unsigned sent_n;
+
+static void capture(void *ctx, uint8_t byte) {
+    (void)ctx;
+    if (sent_n < sizeof sent) sent[sent_n] = byte;
+    sent_n++;
+}
+
+static void hook_up(void) {
+    sent_n = 0;
+    uart_set_tx(&uart, capture, NULL);
+}
+
+void test_i1_byte_reaches_host(void) {
+    hook_up();
+    put(UART_THR, 0x41);
+    TEST_ASSERT_EQUAL_UINT(1, sent_n);
+    TEST_ASSERT_EQUAL_HEX8(0x41, sent[0]);
+    TEST_ASSERT_EQUAL_HEX32(0x60, reg(UART_LSR));
+}
+
+void test_i2_many_bytes_in_order(void) {
+    hook_up();
+    const char *text = "hello, uart: twenty b";
+    unsigned n = 0;
+    for (; text[n]; n++) put(UART_THR, (uint8_t)text[n]);
+    TEST_ASSERT_EQUAL_UINT(n, sent_n);
+    TEST_ASSERT_EQUAL_MEMORY(text, sent, n);
+}
+
+void test_i3_dlab_write_is_not_transmitted(void) {
+    hook_up();
+    put(UART_LCR, UART_LCR_DLAB);
+    put(UART_DLL, 0x34);
+    TEST_ASSERT_EQUAL_UINT(0, sent_n);
+    TEST_ASSERT_EQUAL_HEX32(0x34, reg(UART_DLL));
+}
+
+void test_i4_no_hook_is_fine(void) {
+    put(UART_THR, 0x41);
+    TEST_ASSERT_EQUAL_HEX32(0x60, reg(UART_LSR));
+}
+
+void test_i5_loopback_stays_inside(void) {
+    hook_up();
+    put(UART_MCR, UART_MCR_LOOP);
+    put(UART_THR, 0x41);
+    TEST_ASSERT_EQUAL_UINT(0, sent_n);
+}
+
+void test_i6_enabling_etbei_raises_thre(void) {
+    put(UART_IER, UART_IER_ETBEI);
+    TEST_ASSERT_TRUE(uart_interrupt_pending(&uart));
+    TEST_ASSERT_EQUAL_HEX32(0x02, reg(UART_IIR));
+}
+
+void test_i7_iir_read_clears_it(void) {
+    put(UART_IER, UART_IER_ETBEI);
+    (void)reg(UART_IIR);
+    TEST_ASSERT_EQUAL_HEX32(0x01, reg(UART_IIR));
+    TEST_ASSERT_FALSE(uart_interrupt_pending(&uart));
+}
+
+void test_i8_thr_write_rearms(void) {
+    hook_up();
+    put(UART_IER, UART_IER_ETBEI);
+    (void)reg(UART_IIR);
+    put(UART_THR, 0x41);
+    TEST_ASSERT_TRUE(uart_interrupt_pending(&uart));
+    TEST_ASSERT_EQUAL_HEX32(0x02, reg(UART_IIR));
+}
+
+void test_i9_disabling_etbei_hides_it(void) {
+    put(UART_IER, UART_IER_ETBEI);
+    put(UART_IER, 0x00);
+    TEST_ASSERT_FALSE(uart_interrupt_pending(&uart));
+    TEST_ASSERT_EQUAL_HEX32(0x01, reg(UART_IIR));
+}
+
+void test_i10_every_rising_edge_rearms(void) {
+    for (int i = 0; i < 3; i++) {
+        put(UART_IER, UART_IER_ETBEI);
+        TEST_ASSERT_EQUAL_HEX32(0x02, reg(UART_IIR));
+        put(UART_IER, 0x00);
+    }
+}
+
+void test_i11_staying_enabled_does_not_rearm(void) {
+    put(UART_IER, UART_IER_ETBEI);
+    (void)reg(UART_IIR);
+    put(UART_IER, UART_IER_ETBEI | 0x01);
+    TEST_ASSERT_EQUAL_HEX32(0x01, reg(UART_IIR));
+}
+
+void test_i12_fcr_bit0_change_rearms(void) {
+    put(UART_IER, UART_IER_ETBEI);
+    (void)reg(UART_IIR);
+    put(UART_FCR, 0x01);                           // bit 0 changes 0 -> 1
+    TEST_ASSERT_EQUAL_HEX32(0xC2, reg(UART_IIR));
+    put(UART_FCR, 0x01);                           // unchanged
+    TEST_ASSERT_EQUAL_HEX32(0xC1, reg(UART_IIR));
+    put(UART_FCR, 0x00);                           // 1 -> 0
+    TEST_ASSERT_EQUAL_HEX32(0x02, reg(UART_IIR));
+}
+
+void test_i13_iir_with_fifos(void) {
+    put(UART_FCR, 0x01);
+    put(UART_IER, UART_IER_ETBEI);
+    TEST_ASSERT_EQUAL_HEX32(0xC2, reg(UART_IIR));
+}
+
+void test_i14_latch_survives_while_disabled(void) {
+    hook_up();
+    put(UART_THR, 0x41);                           // sets the latch with ETBEI clear
+    TEST_ASSERT_EQUAL_HEX32(0x01, reg(UART_IIR));
+    TEST_ASSERT_FALSE(uart_interrupt_pending(&uart));
+    put(UART_IER, UART_IER_ETBEI);
+    TEST_ASSERT_EQUAL_HEX32(0x02, reg(UART_IIR));
+}
+
+void test_i15_reset_keeps_hook_and_clears_latch(void) {
+    hook_up();
+    put(UART_IER, UART_IER_ETBEI);
+    uart_reset(&uart);
+    TEST_ASSERT_FALSE(uart.thre_pending);
+    put(UART_THR, 0x42);
+    TEST_ASSERT_EQUAL_UINT(1, sent_n);
+    TEST_ASSERT_EQUAL_HEX8(0x42, sent[0]);
+}
+
+void test_i16_linux_thre_probe(void) {
+    for (int i = 0; i < 3; i++) {                  // enable, read IIR, disable: every time it must show THRE
+        put(UART_IER, UART_IER_ETBEI);
+        TEST_ASSERT_EQUAL_HEX32(0x02, reg(UART_IIR) & 0x0F);
+        put(UART_IER, 0x00);
+    }
+}
+
+void test_i17_polled_print_loop(void) {
+    hook_up();
+    const char *text = "Hi\n";
+    for (const char *c = text; *c; c++) {
+        while (!(reg(UART_LSR) & UART_LSR_THRE)) { }
+        put(UART_THR, (uint8_t)*c);
+    }
+    TEST_ASSERT_EQUAL_UINT(3, sent_n);
+    TEST_ASSERT_EQUAL_MEMORY(text, sent, 3);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_a1_reset_values);
@@ -372,7 +524,7 @@ int main(void) {
     RUN_TEST(test_d3_trigger_not_programmed_without_enable);
     RUN_TEST(test_d4_trigger_levels);
     RUN_TEST(test_d5_clear_bits_are_accepted);
-    RUN_TEST(test_d6_ier_alone_raises_nothing);
+    RUN_TEST(test_d6_ier_without_etbei_raises_nothing);
     RUN_TEST(test_d7_offset2_reads_iir_not_fcr);
     RUN_TEST(test_e1_lsr_constant);
     RUN_TEST(test_e2_lsr_write_ignored);
@@ -395,5 +547,22 @@ int main(void) {
     RUN_TEST(test_h3_byte_accesses_succeed);
     RUN_TEST(test_h4_thr_write_dropped);
     RUN_TEST(test_h5_device_description);
+    RUN_TEST(test_i1_byte_reaches_host);
+    RUN_TEST(test_i2_many_bytes_in_order);
+    RUN_TEST(test_i3_dlab_write_is_not_transmitted);
+    RUN_TEST(test_i4_no_hook_is_fine);
+    RUN_TEST(test_i5_loopback_stays_inside);
+    RUN_TEST(test_i6_enabling_etbei_raises_thre);
+    RUN_TEST(test_i7_iir_read_clears_it);
+    RUN_TEST(test_i8_thr_write_rearms);
+    RUN_TEST(test_i9_disabling_etbei_hides_it);
+    RUN_TEST(test_i10_every_rising_edge_rearms);
+    RUN_TEST(test_i11_staying_enabled_does_not_rearm);
+    RUN_TEST(test_i12_fcr_bit0_change_rearms);
+    RUN_TEST(test_i13_iir_with_fifos);
+    RUN_TEST(test_i14_latch_survives_while_disabled);
+    RUN_TEST(test_i15_reset_keeps_hook_and_clears_latch);
+    RUN_TEST(test_i16_linux_thre_probe);
+    RUN_TEST(test_i17_polled_print_loop);
     return UNITY_END();
 }
