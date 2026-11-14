@@ -105,7 +105,10 @@ if(RISCV_TESTS)
                      ${CMAKE_SOURCE_DIR}/tests/asm/timer_interrupt.S
                      ${CMAKE_SOURCE_DIR}/tests/asm/wfi_idle.S
                      ${CMAKE_SOURCE_DIR}/tests/asm/sbi_timer.S
-                     ${CMAKE_SOURCE_DIR}/tests/asm/time_gating.S)
+                     ${CMAKE_SOURCE_DIR}/tests/asm/time_gating.S
+                     ${CMAKE_SOURCE_DIR}/tests/asm/uart_hello.S
+                     ${CMAKE_SOURCE_DIR}/tests/asm/uart_probe.S
+                     ${CMAKE_SOURCE_DIR}/tests/asm/uart_faults.S)
     add_test(NAME riscv-tests.build-asm
              COMMAND "${CMAKE_SOURCE_DIR}/scripts/build-asm-tests.sh"
                      "${RISCV_TESTS_SRC_DIR}" "${RISCV_TESTS_BUILD_DIR}" ${_asm_sources})
@@ -141,6 +144,21 @@ if(RISCV_TESTS)
         add_test(NAME riscv-tests.${timer_test}
                  COMMAND riscv_emu "${RISCV_TESTS_BUILD_DIR}/${timer_elf}")
         set_tests_properties(riscv-tests.${timer_test} PROPERTIES
+            FIXTURES_REQUIRED riscv-tests-elfs TIMEOUT 60 LABELS riscv-tests)
+    endforeach()
+
+    # The UART through the real emulator: an OpenSBI-style console that prints a line (the text must reach stdout),
+    # the probes Linux's 8250 driver runs plus loopback, overrun and interrupt priority, and the device's strict bus rules.
+    add_test(NAME riscv-tests.uart-hello
+             COMMAND riscv_emu "${RISCV_TESTS_BUILD_DIR}/uart_hello")
+    set_tests_properties(riscv-tests.uart-hello PROPERTIES
+        FIXTURES_REQUIRED riscv-tests-elfs TIMEOUT 60 LABELS riscv-tests
+        PASS_REGULAR_EXPRESSION "Hello, UART!.*PASS \\(")
+    foreach(uart_test uart-probe uart-faults)
+        string(REPLACE "-" "_" uart_elf ${uart_test})
+        add_test(NAME riscv-tests.${uart_test}
+                 COMMAND riscv_emu "${RISCV_TESTS_BUILD_DIR}/${uart_elf}")
+        set_tests_properties(riscv-tests.${uart_test} PROPERTIES
             FIXTURES_REQUIRED riscv-tests-elfs TIMEOUT 60 LABELS riscv-tests)
     endforeach()
 
