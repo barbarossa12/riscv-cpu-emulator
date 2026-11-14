@@ -2,15 +2,20 @@
 #include <stdlib.h>
 #include <errno.h>
 #include <string.h>
+#include <unistd.h>
 #include "cpu.h"
 #include "mem.h"
 #include "execute.h"
 #include "elf.h"
 #include "log.h"
+#include "uart.h"
+#include "uart_host.h"
 
 #define RAM_BASE              0x80000000u
 #define RAM_SIZE              (16u * 1024 * 1024)
 #define DEFAULT_MAX_INSTRS    1000000ull
+
+#define UART_STDIN_POLL_INTERVAL 1024u   // cpu steps between looks at stdin (a fixed count, so piped input is deterministic)
 
 #define EXIT_TEST_PASS        0
 #define EXIT_TEST_FAIL        1
@@ -83,8 +88,26 @@ int main(int argc, char **argv) {
 	cpu.pc = img.entry;
 	mem_add_device(&mem, clint_device(&cpu.clint));
 
+	/* The UART: output to stdout (flushed per byte on a terminal), input from stdin only when
+	 * RISCV_EMU_UART_STDIN is set, so ordinary runs stay deterministic. RISCV_EMU_UART_TIMEOUT sets
+	 * the receive timeout in cpu steps; a bad value is ignored with a warning, like RISCV_EMU_LOG. */
+	Uart uart;
+	uart_reset(&uart);
+	HostOutput uart_out = { stdout, isatty(STDOUT_FILENO) != 0 };
+	uart_set_tx(&uart, uart_host_tx, &uart_out);
+	const char *timeout_env = getenv("RISCV_EMU_UART_TIMEOUT");
+	if (timeout_env) {
+		uint32_t cycles;
+		if (uart_host_parse_u32(timeout_env, &cycles)) uart_set_timeout(&uart, cycles);
+		else fprintf(stderr, "%s: ignoring RISCV_EMU_UART_TIMEOUT=%s (use a number of cpu steps)\n", argv[0], timeout_env);
+	}
+	mem_add_device(&mem, uart_device(&uart));
+	HostInput uart_in;
+	host_input_init(&uart_in, getenv("RISCV_EMU_UART_STDIN") ? STDIN_FILENO : -1);
+
 	for (unsigned long long executed = 0; executed < max_instrs; executed++) {
 		cpu_step(&cpu, &mem);
+		if (executed % UART_STDIN_POLL_INTERVAL == 0) host_input_poll(&uart_in, &uart);
 
 		(void)mem_try_read32(&mem, img.tohost, &tohost_word); // address checked above
 		if (tohost_word != 0) {
