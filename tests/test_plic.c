@@ -174,6 +174,12 @@ void test_a_high_line_raises_eip_on_the_enabled_context_only(void) {
     TEST_ASSERT_EQUAL_HEX32(1u << 10, reg(PLIC_PENDING));
 }
 
+void test_a_pending_read_samples_the_gateway_itself(void) {
+    connect(10, 3);
+    level[10] = true;                                       // nothing has sampled the line yet
+    TEST_ASSERT_EQUAL_HEX32(1u << 10, reg(PLIC_PENDING));
+}
+
 void test_claim_returns_the_id_clears_pending_and_blocks_the_gateway(void) {
     connect(10, 3);
     enable_for(0, 10);
@@ -392,6 +398,7 @@ int main(void) {
     RUN_TEST(test_context_2_faults);
     RUN_TEST(test_unconnected_claim_reads_zero_and_complete_is_ignored);
     RUN_TEST(test_a_high_line_raises_eip_on_the_enabled_context_only);
+    RUN_TEST(test_a_pending_read_samples_the_gateway_itself);
     RUN_TEST(test_claim_returns_the_id_clears_pending_and_blocks_the_gateway);
     RUN_TEST(test_complete_with_the_line_still_high_forwards_a_new_request);
     RUN_TEST(test_complete_with_the_line_low_does_not_raise_again);
