@@ -221,3 +221,9 @@ bool mem_bus_writable(Memory *mem, uint32_t addr, uint32_t size) {
 	const Device *d = device_for(mem, addr, size);
 	return d && d->write && device_takes(d, addr, size);
 }
+
+void mem_tick(Memory *mem) {
+	for (int i = 0; i < mem->device_count; i++) {
+		if (mem->devices[i].tick) mem->devices[i].tick(mem->devices[i].ctx);
+	}
+}

@@ -21,6 +21,7 @@ typedef struct Device {
 	bool (*read)(void *ctx, uint32_t offset, uint32_t size, uint32_t *value);
 	bool (*write)(void *ctx, uint32_t offset, uint32_t size, uint32_t value);
 	void *ctx;
+	void (*tick)(void *ctx);   // optional: called once per cpu step, for devices that count cycles
 } Device;
 
 typedef struct Memory {
@@ -62,3 +63,4 @@ bool mem_in_ram(const Memory *mem, uint32_t addr, uint32_t n); // all n bytes ar
 bool mem_bus_read(Memory *mem, uint32_t addr, uint32_t size, uint32_t *out);   // size 1 to 4
 bool mem_bus_write(Memory *mem, uint32_t addr, uint32_t size, uint32_t val);   // size 1 to 4
 bool mem_bus_writable(Memory *mem, uint32_t addr, uint32_t size); // like a write, but touches nothing
+void mem_tick(Memory *mem);                   // calls tick on every device that has one

@@ -1013,6 +1013,7 @@ void cpu_step(CPU *cpu, Memory *mem) {
         cpu->mcycle++;
     }
     clint_tick(&cpu->clint);                  // mtime follows the cpu cycles, whatever software writes to mcycle
+    mem_tick(mem);                            // devices that count cycles (the UART's receive timeout)
     if (!cpu->trapped && !cpu->minstret_written) {
         cpu->minstret++;
     }
