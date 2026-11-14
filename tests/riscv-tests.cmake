@@ -110,7 +110,8 @@ if(RISCV_TESTS)
                      ${CMAKE_SOURCE_DIR}/tests/asm/uart_probe.S
                      ${CMAKE_SOURCE_DIR}/tests/asm/uart_faults.S
                      ${CMAKE_SOURCE_DIR}/tests/asm/uart_timeout.S
-                     ${CMAKE_SOURCE_DIR}/tests/asm/uart_echo.S)
+                     ${CMAKE_SOURCE_DIR}/tests/asm/uart_echo.S
+                     ${CMAKE_SOURCE_DIR}/tests/asm/uart_autoconfig_variants.S)
     add_test(NAME riscv-tests.build-asm
              COMMAND "${CMAKE_SOURCE_DIR}/scripts/build-asm-tests.sh"
                      "${RISCV_TESTS_SRC_DIR}" "${RISCV_TESTS_BUILD_DIR}" ${_asm_sources})
@@ -156,7 +157,7 @@ if(RISCV_TESTS)
     set_tests_properties(riscv-tests.uart-hello PROPERTIES
         FIXTURES_REQUIRED riscv-tests-elfs TIMEOUT 60 LABELS riscv-tests
         PASS_REGULAR_EXPRESSION "Hello, UART!.*PASS \\(")
-    foreach(uart_test uart-probe uart-faults)
+    foreach(uart_test uart-probe uart-faults uart-autoconfig-variants)
         string(REPLACE "-" "_" uart_elf ${uart_test})
         add_test(NAME riscv-tests.${uart_test}
                  COMMAND riscv_emu "${RISCV_TESTS_BUILD_DIR}/${uart_elf}")
