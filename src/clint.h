@@ -30,8 +30,14 @@ typedef struct Clint {
 // The manual leaves these reset values unspecified (machine.adoc:2771-2790).
 void clint_reset(Clint *c);
 void clint_tick(Clint *c);                    // one cpu cycle
-// Idle time passes (WFI): mtime jumps to mtimecmp and the tick phase restarts. All ones in mtimecmp means no timer is
-// armed, so there is nothing to wait for. Returns true if mtime moved.
+// Idle time passes (WFI). The cycles until mtime reaches mtimecmp, or CLINT_NEVER if no timer is armed (mtimecmp all ones)
+// or it has been reached already. A far target saturates at CLINT_NEVER - 1, so it still counts as armed.
+#define CLINT_NEVER UINT64_MAX
+uint64_t clint_timer_horizon(const Clint *c);
+// That many cpu cycles pass with no instruction executed: mtime and the tick phase move exactly as clint_tick would.
+void clint_advance(Clint *c, uint64_t cycles);
+// mtime jumps to mtimecmp and the tick phase restarts (the same as advancing by the horizon, without the cycle
+// arithmetic, which overflows for a far target). Returns true if mtime moved.
 bool clint_idle_until_timer(Clint *c);
 bool clint_timer_pending(const Clint *c);     // MTIP: mtime >= mtimecmp, unsigned (machine.adoc:2521)
 bool clint_software_pending(const Clint *c);  // MSIP

@@ -11,6 +11,23 @@ void clint_tick(Clint *c) {
 	}
 }
 
+uint64_t clint_timer_horizon(const Clint *c) {
+	if (c->mtimecmp == UINT64_MAX || c->mtime >= c->mtimecmp) {
+		return CLINT_NEVER;
+	}
+	uint64_t ticks = c->mtimecmp - c->mtime;   // at least 1
+	if (ticks > (CLINT_NEVER - 1) / CLINT_CYCLES_PER_TICK) {
+		return CLINT_NEVER - 1;
+	}
+	return ticks * CLINT_CYCLES_PER_TICK - c->phase;
+}
+
+void clint_advance(Clint *c, uint64_t cycles) {
+	uint64_t rest = cycles % CLINT_CYCLES_PER_TICK;
+	c->mtime += cycles / CLINT_CYCLES_PER_TICK + (c->phase + rest) / CLINT_CYCLES_PER_TICK;
+	c->phase = (uint32_t)((c->phase + rest) % CLINT_CYCLES_PER_TICK);
+}
+
 bool clint_idle_until_timer(Clint *c) {
 	if (c->mtimecmp == UINT64_MAX || c->mtime >= c->mtimecmp) {
 		return false;
