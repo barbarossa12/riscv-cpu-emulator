@@ -19,16 +19,29 @@
 #define PLIC_CONTEXT    0x200000u    // 0x1000 per context: +0 threshold, +4 claim/complete
 #define PLIC_CONTEXT_STRIDE 0x1000u
 
+// A source's interrupt line: its level, true while asserted. It must have no side effects.
+typedef bool (*PlicLine)(void *ctx);
+
 typedef struct Plic {
 	uint32_t priority[PLIC_NSOURCES + 1];   // index 0 unused
-	uint32_t pending;                        // bit 0 always 0
+	uint32_t pending;                        // the latched requests; bit 0 always 0
 	uint32_t enable[PLIC_NCONTEXTS];         // bit 0 always 0
 	uint32_t threshold[PLIC_NCONTEXTS];
+	uint32_t in_flight;                      // gateway: claimed but not yet completed
+	PlicLine line[PLIC_NSOURCES + 1];        // registered sources (NULL: nothing connected)
+	void    *line_ctx[PLIC_NSOURCES + 1];
 } Plic;
 
-// The PLIC spec leaves reset values open; everything is 0 (no source can interrupt).
+// The PLIC spec leaves reset values open; everything is 0 (no source can interrupt). The registered source
+// lines are kept, like the UART keeps its transmit hook.
 void plic_reset(Plic *p);
+// Connect a source: id 1 to PLIC_NSOURCES, otherwise it aborts.
+void plic_set_source(Plic *p, uint32_t id, PlicLine line, void *ctx);
+// The context's external interrupt pending signal (EIP): an enabled pending source whose priority is above the
+// context's threshold (PLIC spec, "Interrupt Flow"). It samples the gateways first, so it latches new requests.
+bool plic_context_pending(Plic *p, uint32_t context);
 // 32-bit accesses only. Every offset that is not a register below is an access fault: priority words 1 to 31,
 // the pending word, one enable word and the threshold and claim words for each context. Pending is read-only
-// (a write is ignored). Claim reads 0 and complete is ignored until the gateway exists (Milestone 8.2).
+// (a write is ignored). A claim read returns and takes the best pending source for that context, and a complete
+// write re-arms a source's gateway (PLIC spec, "Interrupt Claim Process", "Interrupt Completion").
 Device plic_device(Plic *p);   // for mem_add_device
