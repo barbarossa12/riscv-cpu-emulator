@@ -1021,6 +1021,83 @@ void test_k15_fcr_changes_move_the_line(void) {
     TEST_ASSERT_FALSE(line());
 }
 
+/* ---- Idle time (WFI): the receive timeout comes up by itself ---- */
+
+static void idle_ready(void) {
+    put(UART_IER, UART_IER_ERBFI);
+    fifo_on(2);                                              // trigger 8
+}
+
+void test_m1_horizon_is_never_without_a_character(void) {
+    idle_ready();
+    TEST_ASSERT_EQUAL_UINT64(UINT64_MAX, uart_idle_horizon(&uart));
+}
+
+void test_m2_horizon_is_never_with_the_fifos_off(void) {
+    uart_receive(&uart, 1);
+    TEST_ASSERT_EQUAL_UINT64(UINT64_MAX, uart_idle_horizon(&uart));
+}
+
+void test_m3_horizon_counts_down_to_the_timeout(void) {
+    idle_ready();
+    uart_receive(&uart, 1);
+    TEST_ASSERT_EQUAL_UINT64(UART_TIMEOUT_CYCLES, uart_idle_horizon(&uart));
+    ticks(100);
+    TEST_ASSERT_EQUAL_UINT64(UART_TIMEOUT_CYCLES - 100, uart_idle_horizon(&uart));
+}
+
+void test_m4_horizon_is_never_once_the_timeout_is_up(void) {
+    idle_ready();
+    uart_receive(&uart, 1);
+    ticks(UART_TIMEOUT_CYCLES);
+    TEST_ASSERT_EQUAL_UINT64(UINT64_MAX, uart_idle_horizon(&uart));
+}
+
+void test_m5_idle_for_the_horizon_raises_the_timeout_one_less_does_not(void) {
+    idle_ready();
+    uart_receive(&uart, 1);
+    uart_idle(&uart, uart_idle_horizon(&uart) - 1);
+    TEST_ASSERT_EQUAL_HEX32(0xC1, reg(UART_IIR));
+    uart_idle(&uart, 1);
+    TEST_ASSERT_EQUAL_HEX32(0xCC, reg(UART_IIR));
+}
+
+void test_m6_idle_is_capped_at_the_timeout(void) {
+    idle_ready();
+    uart_receive(&uart, 1);
+    uart_idle(&uart, UINT64_MAX);
+    TEST_ASSERT_EQUAL_UINT32(UART_TIMEOUT_CYCLES, uart.rx_idle);
+    TEST_ASSERT_EQUAL_HEX32(0xCC, reg(UART_IIR));
+}
+
+void test_m7_a_read_restarts_the_horizon(void) {
+    idle_ready();
+    uart_receive(&uart, 1);
+    uart_receive(&uart, 2);
+    uart_idle(&uart, 5000);
+    (void)reg(UART_RBR);
+    TEST_ASSERT_EQUAL_UINT64(UART_TIMEOUT_CYCLES, uart_idle_horizon(&uart));
+}
+
+void test_m8_idle_after_the_timeout_was_lowered_below_rx_idle(void) {
+    idle_ready();
+    uart_receive(&uart, 1);
+    ticks(1000);
+    uart_set_timeout(&uart, 10);                             // below rx_idle now
+    uart_idle(&uart, 5);                                     // must not wrap
+    TEST_ASSERT_EQUAL_UINT32(1000, uart.rx_idle);
+    TEST_ASSERT_EQUAL_UINT64(UINT64_MAX, uart_idle_horizon(&uart));
+    uart_set_timeout(&uart, 0);                              // the timeout survives uart_reset: restore the default
+}
+
+void test_m9_the_bus_calls_the_uart_idle_hooks(void) {
+    idle_ready();
+    uart_receive(&uart, 1);
+    TEST_ASSERT_EQUAL_UINT64(UART_TIMEOUT_CYCLES, mem_idle_horizon(&mem));
+    mem_idle(&mem, 300);
+    TEST_ASSERT_EQUAL_UINT64(UART_TIMEOUT_CYCLES - 300, mem_idle_horizon(&mem));
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_a1_reset_values);
@@ -1129,5 +1206,14 @@ int main(void) {
     RUN_TEST(test_k13_dlab_does_not_matter);
     RUN_TEST(test_k14_reset_lowers_everything);
     RUN_TEST(test_k15_fcr_changes_move_the_line);
+    RUN_TEST(test_m1_horizon_is_never_without_a_character);
+    RUN_TEST(test_m2_horizon_is_never_with_the_fifos_off);
+    RUN_TEST(test_m3_horizon_counts_down_to_the_timeout);
+    RUN_TEST(test_m4_horizon_is_never_once_the_timeout_is_up);
+    RUN_TEST(test_m5_idle_for_the_horizon_raises_the_timeout_one_less_does_not);
+    RUN_TEST(test_m6_idle_is_capped_at_the_timeout);
+    RUN_TEST(test_m7_a_read_restarts_the_horizon);
+    RUN_TEST(test_m8_idle_after_the_timeout_was_lowered_below_rx_idle);
+    RUN_TEST(test_m9_the_bus_calls_the_uart_idle_hooks);
     return UNITY_END();
 }

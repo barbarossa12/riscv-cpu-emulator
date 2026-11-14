@@ -2,6 +2,7 @@
 #include "cpu_test_util.h"
 #include "../src/execute.h"
 #include "../src/clint.h"
+#include "../src/uart.h"
 
 // WFI with the CLINT timer (Milestone 6.6). It may simply return (machine.adoc:2705); here it also lets idle time
 // pass by jumping mtime to mtimecmp when MTIE is set and no locally enabled interrupt is already pending.
@@ -305,6 +306,151 @@ void test_g1_idle_until_timer_never_moves_time_back_or_to_an_unarmed_timer(void)
     TEST_ASSERT_EQUAL_UINT64(UINT64_MAX - 1, c.mtime);
 }
 
+/* ---- H. Device events (Milestone 8.4) ---------------------------------------------------------------------------- */
+// A UART with one received character, so its receive timeout comes up by itself after UART_TIMEOUT_CYCLES idle cycles.
+// The interrupt reaches the hart through the PLIC (source 10, context 0, MEIP).
+
+static Uart uart;
+static bool uart_line_for_test(void *ctx) { return uart_interrupt_pending(ctx); }
+
+static void uart_setup(PrivMode mode) {
+    setup(mode);
+    uart_reset(&uart);
+    mem_add_device(&mem, uart_device(&uart));
+    mem_bus_write(&mem, UART_BASE + UART_IER, 1, UART_IER_ERBFI);
+    mem_bus_write(&mem, UART_BASE + UART_FCR, 1, 0x81);                     // FIFOs on, trigger 8
+    uart_receive(&uart, 0x41);
+    plic_set_source(&cpu.plic, 10, uart_line_for_test, &uart);
+    cpu.plic.priority[10] = 1;
+    cpu.plic.enable[0] = 1u << 10;
+    cpu_write_csr(&cpu, CSR_MSTATUS, MSTATUS_MIE);
+}
+
+void test_h1_a_device_event_before_the_timer_limits_the_jump(void) {
+    uart_setup(PRV_M);
+    cpu_write_csr(&cpu, CSR_MIE, INT_MTI | INT_MEI);
+    cpu.clint.mtimecmp = 1000000;
+    step();
+    TEST_ASSERT_EQUAL_UINT64(100 + UART_TIMEOUT_CYCLES / CLINT_CYCLES_PER_TICK, cpu.clint.mtime);   // not mtimecmp
+    TEST_ASSERT_EQUAL_UINT32(UART_TIMEOUT_CYCLES, uart.rx_idle);
+    TEST_ASSERT_TRUE(cpu_read_csr(&cpu, CSR_MIP) & INT_MEI);
+    step();                                                                  // the interrupt, on the next instruction
+    TEST_ASSERT_EQUAL_HEX32(MTVEC, cpu.pc);
+    TEST_ASSERT_EQUAL_HEX32(0x8000000Bu, cpu_read_csr(&cpu, CSR_MCAUSE));
+    TEST_ASSERT_EQUAL_HEX32(PC + 4, cpu_read_csr(&cpu, CSR_MEPC));
+}
+
+void test_h2_the_timer_first_advances_the_uart_by_the_same_time(void) {
+    uart_setup(PRV_M);
+    cpu_write_csr(&cpu, CSR_MIE, INT_MTI | INT_MEI);
+    cpu.clint.mtimecmp = 150;                                                // 500 cycles away
+    step();
+    TEST_ASSERT_EQUAL_UINT64(150, cpu.clint.mtime);
+    TEST_ASSERT_EQUAL_UINT32(500 + 1, uart.rx_idle);                         // the jump, and the WFI's own cycle
+    TEST_ASSERT_FALSE(cpu_read_csr(&cpu, CSR_MIP) & INT_MEI);
+    TEST_ASSERT_TRUE(cpu_read_csr(&cpu, CSR_MIP) & INT_MTI);
+}
+
+void test_h3_with_the_external_enables_clear_the_device_event_is_ignored(void) {
+    uart_setup(PRV_M);
+    cpu_write_csr(&cpu, CSR_MIE, INT_MTI);
+    cpu.clint.mtimecmp = 100 + 5000;                                         // 50000 cycles, after the UART's 35000
+    step();
+    TEST_ASSERT_EQUAL_UINT64(5100, cpu.clint.mtime);
+}
+
+void test_h4_only_meie_or_seie_makes_the_device_event_count(void) {
+    uart_setup(PRV_M);
+    cpu_write_csr(&cpu, CSR_MIE, INT_SEI | INT_MTI);
+    cpu.clint.mtimecmp = 1000000;
+    step();
+    TEST_ASSERT_EQUAL_UINT64(100 + UART_TIMEOUT_CYCLES / CLINT_CYCLES_PER_TICK, cpu.clint.mtime);
+}
+
+void test_h5_with_no_timer_armed_a_device_event_still_passes_time(void) {
+    uart_setup(PRV_M);
+    cpu_write_csr(&cpu, CSR_MIE, INT_MEI);
+    step();                                                                  // mtimecmp is all ones
+    TEST_ASSERT_EQUAL_UINT64(100 + UART_TIMEOUT_CYCLES / CLINT_CYCLES_PER_TICK, cpu.clint.mtime);
+    step();
+    TEST_ASSERT_EQUAL_HEX32(0x8000000Bu, cpu_read_csr(&cpu, CSR_MCAUSE));
+}
+
+void test_h6_no_device_event_pending_falls_back_to_the_timer(void) {
+    uart_setup(PRV_M);
+    uart_reset(&uart);                                                       // no character now
+    cpu_write_csr(&cpu, CSR_MIE, INT_MTI | INT_MEI);
+    cpu.clint.mtimecmp = 7000;
+    step();
+    TEST_ASSERT_EQUAL_UINT64(7000, cpu.clint.mtime);
+}
+
+void test_h7_nothing_enabled_nothing_passes(void) {
+    uart_setup(PRV_M);
+    cpu_write_csr(&cpu, CSR_MIE, 0);
+    cpu.clint.mtimecmp = 1000;
+    step();
+    TEST_ASSERT_EQUAL_UINT64(100, cpu.clint.mtime);
+    TEST_ASSERT_EQUAL_UINT32(1, uart.rx_idle);                               // only the WFI's own cycle
+}
+
+void test_h8_an_enabled_pending_interrupt_means_no_jump(void) {
+    uart_setup(PRV_M);
+    cpu_write_csr(&cpu, CSR_MSTATUS, 0);                                     // not taken, but pending and enabled
+    cpu_write_csr(&cpu, CSR_MIE, INT_MTI | INT_MEI);
+    cpu.clint.mtimecmp = 1000000;
+    while (!(cpu_read_csr(&cpu, CSR_MIP) & INT_MEI)) uart_tick(&uart);
+    step();
+    TEST_ASSERT_EQUAL_UINT64(100, cpu.clint.mtime);
+}
+
+void test_h9_mcycle_and_minstret(void) {
+    uart_setup(PRV_M);
+    cpu_write_csr(&cpu, CSR_MIE, INT_MEI);
+    uint64_t cycle = cpu.mcycle, instret = cpu.minstret;
+    step();
+    TEST_ASSERT_EQUAL_UINT64(cycle + 1, cpu.mcycle);                         // the WFI's own cycle, none for the idle time
+    TEST_ASSERT_EQUAL_UINT64(instret + 1, cpu.minstret);
+}
+
+static bool poll_delivers;
+static unsigned polls;
+static bool fake_poll(void *ctx) { (void)ctx; polls++; return poll_delivers; }
+
+void test_h10_host_input_that_arrived_means_no_jump(void) {
+    uart_setup(PRV_M);
+    cpu_write_csr(&cpu, CSR_MIE, INT_MTI | INT_MEI);
+    cpu.clint.mtimecmp = 5000;
+    cpu.idle_poll = fake_poll;
+    poll_delivers = true;
+    polls = 0;
+    step();
+    TEST_ASSERT_EQUAL_UINT(1, polls);
+    TEST_ASSERT_EQUAL_UINT64(100, cpu.clint.mtime);
+    TEST_ASSERT_EQUAL_UINT32(1, uart.rx_idle);
+}
+
+void test_h11_a_poll_that_delivers_nothing_changes_nothing(void) {
+    uart_setup(PRV_M);
+    cpu_write_csr(&cpu, CSR_MIE, INT_MTI | INT_MEI);
+    cpu.clint.mtimecmp = 5000;
+    cpu.idle_poll = fake_poll;
+    poll_delivers = false;
+    polls = 0;
+    step();
+    TEST_ASSERT_EQUAL_UINT(1, polls);
+    TEST_ASSERT_EQUAL_UINT64(100 + UART_TIMEOUT_CYCLES / CLINT_CYCLES_PER_TICK, cpu.clint.mtime);
+}
+
+void test_h12_other_instructions_never_poll(void) {
+    setup(PRV_M);
+    cpu.idle_poll = fake_poll;
+    polls = 0;
+    mem_write32(&mem, PC, NOP);
+    step();
+    TEST_ASSERT_EQUAL_UINT(0, polls);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_a1_jumps_to_mtimecmp);
@@ -328,5 +474,17 @@ int main(void) {
     RUN_TEST(test_e2_s_mode_with_tw_is_illegal_and_moves_nothing);
     RUN_TEST(test_f1_two_runs_agree);
     RUN_TEST(test_g1_idle_until_timer_never_moves_time_back_or_to_an_unarmed_timer);
+    RUN_TEST(test_h1_a_device_event_before_the_timer_limits_the_jump);
+    RUN_TEST(test_h2_the_timer_first_advances_the_uart_by_the_same_time);
+    RUN_TEST(test_h3_with_the_external_enables_clear_the_device_event_is_ignored);
+    RUN_TEST(test_h4_only_meie_or_seie_makes_the_device_event_count);
+    RUN_TEST(test_h5_with_no_timer_armed_a_device_event_still_passes_time);
+    RUN_TEST(test_h6_no_device_event_pending_falls_back_to_the_timer);
+    RUN_TEST(test_h7_nothing_enabled_nothing_passes);
+    RUN_TEST(test_h8_an_enabled_pending_interrupt_means_no_jump);
+    RUN_TEST(test_h9_mcycle_and_minstret);
+    RUN_TEST(test_h10_host_input_that_arrived_means_no_jump);
+    RUN_TEST(test_h11_a_poll_that_delivers_nothing_changes_nothing);
+    RUN_TEST(test_h12_other_instructions_never_poll);
     return UNITY_END();
 }

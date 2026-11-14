@@ -221,6 +221,19 @@ void test_l14_parse_u32(void) {
     }
 }
 
+void test_l7b_the_poll_returns_how_many_bytes_it_delivered(void) {
+    put(UART_FCR, 0x01);
+    TEST_ASSERT_EQUAL_UINT(0, host_input_poll(&in, &uart));                  // nothing waiting
+    host_writes(3, 0x41);
+    TEST_ASSERT_EQUAL_UINT(3, host_input_poll(&in, &uart));
+    TEST_ASSERT_EQUAL_UINT(0, host_input_poll(&in, &uart));                  // already taken
+    host_writes(20, 0);
+    TEST_ASSERT_EQUAL_UINT(13, host_input_poll(&in, &uart));                 // only what fits: 16 - 3
+    HostInput off;
+    host_input_init(&off, -1);
+    TEST_ASSERT_EQUAL_UINT(0, host_input_poll(&off, &uart));                 // disabled
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_l1_bytes_reach_the_stream_in_order);
@@ -238,5 +251,6 @@ int main(void) {
     RUN_TEST(test_l12_a_delivered_byte_raises_the_line);
     RUN_TEST(test_l13_the_poll_leaves_the_registers_alone);
     RUN_TEST(test_l14_parse_u32);
+    RUN_TEST(test_l7b_the_poll_returns_how_many_bytes_it_delivered);
     return UNITY_END();
 }

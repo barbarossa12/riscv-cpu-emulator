@@ -350,6 +350,75 @@ void test_d7_reset_after_running(void) {
     TEST_ASSERT_EQUAL_UINT32(0, cpu.clint.phase);
 }
 
+/* ---- Idle time (WFI): the timer horizon and exact advance ---- */
+
+void test_h1_horizon_unarmed_or_reached_is_never(void) {
+    Clint c;
+    clint_reset(&c);
+    TEST_ASSERT_EQUAL_UINT64(CLINT_NEVER, clint_timer_horizon(&c));         // mtimecmp all ones
+    c.mtime = 100;
+    c.mtimecmp = 100;
+    TEST_ASSERT_EQUAL_UINT64(CLINT_NEVER, clint_timer_horizon(&c));         // reached
+    c.mtimecmp = 99;
+    TEST_ASSERT_EQUAL_UINT64(CLINT_NEVER, clint_timer_horizon(&c));         // passed
+}
+
+void test_h2_horizon_counts_cycles_and_the_phase(void) {
+    Clint c;
+    clint_reset(&c);
+    c.mtime = 100;
+    c.mtimecmp = 101;
+    TEST_ASSERT_EQUAL_UINT64(10, clint_timer_horizon(&c));
+    c.phase = 7;
+    TEST_ASSERT_EQUAL_UINT64(3, clint_timer_horizon(&c));
+    c.mtimecmp = 105;
+    TEST_ASSERT_EQUAL_UINT64(43, clint_timer_horizon(&c));                  // 5 ticks = 50 cycles, 7 already counted
+}
+
+void test_h3_a_far_target_saturates_but_stays_armed(void) {
+    Clint c;
+    clint_reset(&c);
+    c.mtimecmp = UINT64_MAX - 1;
+    TEST_ASSERT_EQUAL_UINT64(CLINT_NEVER - 1, clint_timer_horizon(&c));
+    c.mtimecmp = UINT64_MAX / CLINT_CYCLES_PER_TICK;                        // largest target that still fits in cycles
+    TEST_ASSERT_EQUAL_UINT64((UINT64_MAX / CLINT_CYCLES_PER_TICK) * CLINT_CYCLES_PER_TICK, clint_timer_horizon(&c));
+}
+
+void test_h4_advance_matches_ticking(void) {
+    for (uint32_t phase = 0; phase < CLINT_CYCLES_PER_TICK; phase++) {
+        for (uint64_t cycles = 0; cycles < 45; cycles++) {
+            Clint a, b;
+            clint_reset(&a);
+            clint_reset(&b);
+            a.phase = b.phase = phase;
+            a.mtime = b.mtime = 1000;
+            clint_advance(&a, cycles);
+            for (uint64_t i = 0; i < cycles; i++) clint_tick(&b);
+            TEST_ASSERT_EQUAL_UINT64(b.mtime, a.mtime);
+            TEST_ASSERT_EQUAL_UINT32(b.phase, a.phase);
+        }
+    }
+}
+
+void test_h5_advancing_by_the_horizon_reaches_mtimecmp_with_phase_0(void) {
+    Clint c;
+    clint_reset(&c);
+    c.mtime = 100;
+    c.phase = 6;
+    c.mtimecmp = 250;
+    clint_advance(&c, clint_timer_horizon(&c));
+    TEST_ASSERT_EQUAL_UINT64(250, c.mtime);
+    TEST_ASSERT_EQUAL_UINT32(0, c.phase);
+}
+
+void test_h6_advance_does_not_overflow_the_phase_sum(void) {
+    Clint c;
+    clint_reset(&c);
+    c.phase = 9;
+    clint_advance(&c, UINT64_MAX - 5);                                       // a huge idle must not wrap
+    TEST_ASSERT_EQUAL_UINT64((UINT64_MAX - 5) / 10 + ((9 + (UINT64_MAX - 5) % 10) / 10), c.mtime);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_a1_reset_values);
@@ -379,5 +448,11 @@ int main(void) {
     RUN_TEST(test_d4_fetch_from_the_clint);
     RUN_TEST(test_d5_atomics_on_the_clint);
     RUN_TEST(test_d7_reset_after_running);
+    RUN_TEST(test_h1_horizon_unarmed_or_reached_is_never);
+    RUN_TEST(test_h2_horizon_counts_cycles_and_the_phase);
+    RUN_TEST(test_h3_a_far_target_saturates_but_stays_armed);
+    RUN_TEST(test_h4_advance_matches_ticking);
+    RUN_TEST(test_h5_advancing_by_the_horizon_reaches_mtimecmp_with_phase_0);
+    RUN_TEST(test_h6_advance_does_not_overflow_the_phase_sum);
     return UNITY_END();
 }

@@ -409,6 +409,44 @@ void test_b14_misaligned_ram_access_still_works(void) {
     TEST_ASSERT_EQUAL_HEX32(0x66554433, cpu_read_reg(&cpu, RD));
 }
 
+/* ---- Idle time hooks ---- */
+
+static uint64_t horizon_a = 500, horizon_b = 200;
+static uint64_t idled_a, idled_b;
+static uint64_t get_a(void *ctx) { (void)ctx; return horizon_a; }
+static uint64_t get_b(void *ctx) { (void)ctx; return horizon_b; }
+static void idle_a(void *ctx, uint64_t n) { (void)ctx; idled_a += n; }
+static void idle_b(void *ctx, uint64_t n) { (void)ctx; idled_b += n; }
+
+void test_idle_horizon_is_the_smallest_of_the_devices(void) {
+    Memory m;
+    mem_init_at(&m, 0x80000000u, 0x1000);
+    TEST_ASSERT_EQUAL_UINT64(MEM_IDLE_NEVER, mem_idle_horizon(&m));          // no devices
+    mem_add_device(&m, (Device){ .base = 0x04000000u, .size = 0x10, .sizes = DEV_ACCESS_32 });   // no hook: skipped
+    TEST_ASSERT_EQUAL_UINT64(MEM_IDLE_NEVER, mem_idle_horizon(&m));
+    mem_add_device(&m, (Device){ .base = 0x05000000u, .size = 0x10, .sizes = DEV_ACCESS_32, .idle_horizon = get_a });
+    mem_add_device(&m, (Device){ .base = 0x06000000u, .size = 0x10, .sizes = DEV_ACCESS_32, .idle_horizon = get_b });
+    TEST_ASSERT_EQUAL_UINT64(200, mem_idle_horizon(&m));
+    horizon_b = MEM_IDLE_NEVER;
+    TEST_ASSERT_EQUAL_UINT64(500, mem_idle_horizon(&m));
+    horizon_b = 200;
+    mem_free(&m);
+}
+
+void test_idle_calls_every_device_with_a_hook(void) {
+    Memory m;
+    mem_init_at(&m, 0x80000000u, 0x1000);
+    mem_add_device(&m, (Device){ .base = 0x04000000u, .size = 0x10, .sizes = DEV_ACCESS_32 });
+    mem_add_device(&m, (Device){ .base = 0x05000000u, .size = 0x10, .sizes = DEV_ACCESS_32, .idle = idle_a });
+    mem_add_device(&m, (Device){ .base = 0x06000000u, .size = 0x10, .sizes = DEV_ACCESS_32, .idle = idle_b });
+    idled_a = idled_b = 0;
+    mem_idle(&m, 123);
+    mem_idle(&m, 7);
+    TEST_ASSERT_EQUAL_UINT64(130, idled_a);
+    TEST_ASSERT_EQUAL_UINT64(130, idled_b);
+    mem_free(&m);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_a1_ram_sizes_and_misalignment);
@@ -440,5 +478,7 @@ int main(void) {
     RUN_TEST(test_b12_pmp_still_applies_to_a_device);
     RUN_TEST(test_b13_split_access_onto_a_device);
     RUN_TEST(test_b14_misaligned_ram_access_still_works);
+    RUN_TEST(test_idle_horizon_is_the_smallest_of_the_devices);
+    RUN_TEST(test_idle_calls_every_device_with_a_hook);
     return UNITY_END();
 }
