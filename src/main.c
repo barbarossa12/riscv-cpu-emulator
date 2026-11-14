@@ -107,7 +107,9 @@ int main(int argc, char **argv) {
 
 	for (unsigned long long executed = 0; executed < max_instrs; executed++) {
 		cpu_step(&cpu, &mem);
-		if (executed % UART_STDIN_POLL_INTERVAL == 0) host_input_poll(&uart_in, &uart);
+		/* after each full interval, not at step 0: the guest gets to set the UART up first, and enabling the
+		 * FIFOs discards anything already received (datasheet, FCR bit 0) */
+		if ((executed + 1) % UART_STDIN_POLL_INTERVAL == 0) host_input_poll(&uart_in, &uart);
 
 		(void)mem_try_read32(&mem, img.tohost, &tohost_word); // address checked above
 		if (tohost_word != 0) {
