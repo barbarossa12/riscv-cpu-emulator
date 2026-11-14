@@ -111,7 +111,10 @@ if(RISCV_TESTS)
                      ${CMAKE_SOURCE_DIR}/tests/asm/uart_faults.S
                      ${CMAKE_SOURCE_DIR}/tests/asm/uart_timeout.S
                      ${CMAKE_SOURCE_DIR}/tests/asm/uart_echo.S
-                     ${CMAKE_SOURCE_DIR}/tests/asm/uart_autoconfig_variants.S)
+                     ${CMAKE_SOURCE_DIR}/tests/asm/uart_autoconfig_variants.S
+                     ${CMAKE_SOURCE_DIR}/tests/asm/plic_mmio.S
+                     ${CMAKE_SOURCE_DIR}/tests/asm/uart_plic_irq.S
+                     ${CMAKE_SOURCE_DIR}/tests/asm/plic_s_mode.S)
     add_test(NAME riscv-tests.build-asm
              COMMAND "${CMAKE_SOURCE_DIR}/scripts/build-asm-tests.sh"
                      "${RISCV_TESTS_SRC_DIR}" "${RISCV_TESTS_BUILD_DIR}" ${_asm_sources})
@@ -194,6 +197,23 @@ if(RISCV_TESTS)
     set_tests_properties(riscv-tests.uart-timeout-env-bad PROPERTIES
         FIXTURES_REQUIRED riscv-tests-elfs TIMEOUT 60 LABELS riscv-tests
         PASS_REGULAR_EXPRESSION "ignoring RISCV_EMU_UART_TIMEOUT=abc.*PASS \\(")
+
+    # The PLIC through the real emulator: its registers, bus rules and gateway from M-mode (polling mip), the interrupt-driven
+    # UART the way Linux uses it (claim, read IIR, complete; the printed line must reach stdout), and the supervisor external
+    # interrupt with and without delegation, plus the SEIP read-modify-write rule.
+    foreach(plic_test plic-mmio plic-s-mode)
+        string(REPLACE "-" "_" plic_elf ${plic_test})
+        add_test(NAME riscv-tests.${plic_test}
+                 COMMAND riscv_emu "${RISCV_TESTS_BUILD_DIR}/${plic_elf}")
+        set_tests_properties(riscv-tests.${plic_test} PROPERTIES
+            FIXTURES_REQUIRED riscv-tests-elfs TIMEOUT 60 LABELS riscv-tests
+            PASS_REGULAR_EXPRESSION "PASS \\(")
+    endforeach()
+    add_test(NAME riscv-tests.uart-plic-irq
+             COMMAND riscv_emu "${RISCV_TESTS_BUILD_DIR}/uart_plic_irq")
+    set_tests_properties(riscv-tests.uart-plic-irq PROPERTIES
+        FIXTURES_REQUIRED riscv-tests-elfs TIMEOUT 60 LABELS riscv-tests
+        PASS_REGULAR_EXPRESSION "IRQ OK, transmit by interrupt.*PASS \\(")
 
     foreach(name ${_names})
         add_test(NAME riscv-tests.${name}
