@@ -25,6 +25,7 @@
 #define UART_SCR 7
 
 #define UART_IER_MASK     0x0Fu   // bits 7:4 always read 0
+#define UART_IER_ETBEI    0x02u   // transmitter holding register empty interrupt enable
 #define UART_LCR_DLAB     0x80u
 #define UART_MCR_DTR      0x01u
 #define UART_MCR_RTS      0x02u
@@ -36,6 +37,7 @@
 #define UART_FCR_CLEAR_RX 0x02u
 #define UART_FCR_CLEAR_TX 0x04u
 #define UART_IIR_NO_INT   0x01u
+#define UART_IIR_THRE     0x02u   // cause: transmitter holding register empty
 #define UART_IIR_FIFOS    0xC0u   // bits 7:6 read 1 while the FIFOs are enabled
 #define UART_LSR_DR       0x01u
 #define UART_LSR_THRE     0x20u
@@ -49,6 +51,9 @@
 #define UART_MSR_RI       0x40u
 #define UART_MSR_DCD      0x80u
 
+// Called with each byte the program transmits (not in loopback)
+typedef void (*UartTxFn)(void *ctx, uint8_t byte);
+
 typedef struct Uart {
 	uint8_t ier;
 	uint8_t lcr;
@@ -60,7 +65,12 @@ typedef struct Uart {
 	uint8_t rx_trigger;      // FCR bits 7:6: 0, 1, 2, 3 for 1, 4, 8, 14 bytes
 	uint8_t msr_inputs;      // the status bits 7:4 as last seen
 	uint8_t msr_delta;       // the change flags, bits 3:0
+	bool    thre_pending;    // the THRE interrupt condition (latched; shown in IIR only while ETBEI is set)
+	UartTxFn tx;             // host output for transmitted bytes; NULL drops them
+	void   *tx_ctx;
 } Uart;
 
-void uart_reset(Uart *u);
+void uart_reset(Uart *u);                      // keeps the host output hook
+void uart_set_tx(Uart *u, UartTxFn fn, void *ctx);
+bool uart_interrupt_pending(const Uart *u);    // the interrupt output line (THRE only until the receive side exists)
 Device uart_device(Uart *u);   // for mem_add_device

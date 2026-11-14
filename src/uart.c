@@ -24,8 +24,23 @@ static void update_modem_status(Uart *u) {
 	u->msr_inputs = now;
 }
 
+// IIR bits 3:0 for the highest-priority pending interrupt. Only THRE exists so far (datasheet 8.6.5: a disabled interrupt is
+// not shown in IIR or on INTR).
+static uint8_t iir_cause(const Uart *u) {
+	if (u->thre_pending && (u->ier & UART_IER_ETBEI)) return UART_IIR_THRE;
+	return UART_IIR_NO_INT;
+}
+
+bool uart_interrupt_pending(const Uart *u) { return !(iir_cause(u) & UART_IIR_NO_INT); }
+
+void uart_set_tx(Uart *u, UartTxFn fn, void *ctx) { u->tx = fn; u->tx_ctx = ctx; }
+
 void uart_reset(Uart *u) {
+	UartTxFn tx = u->tx;
+	void *tx_ctx = u->tx_ctx;
 	*u = (Uart){0};                       // IER, FCR, LCR and MCR reset to 0 (datasheet Table 3)
+	u->tx = tx;                           // a reset must not mute the console
+	u->tx_ctx = tx_ctx;
 	u->msr_inputs = modem_inputs(u);      // no change flags after reset
 }
 
@@ -36,7 +51,12 @@ static bool uart_read(void *ctx, uint32_t offset, uint32_t size, uint32_t *value
 	switch (offset) {
 		case UART_RBR: *value = dlab ? u->dll : 0;                  return true;   // no data path yet
 		case UART_IER: *value = dlab ? u->dlm : u->ier;             return true;
-		case UART_IIR: *value = UART_IIR_NO_INT | (u->fifos_enabled ? UART_IIR_FIFOS : 0); return true;
+		case UART_IIR: {
+			uint8_t cause = iir_cause(u);
+			*value = cause | (u->fifos_enabled ? UART_IIR_FIFOS : 0);
+			if (cause == UART_IIR_THRE) u->thre_pending = false;   // reading IIR clears it when THRE is the source
+			return true;
+		}
 		case UART_LCR: *value = u->lcr;                             return true;
 		case UART_MCR: *value = u->mcr;                             return true;
 		case UART_LSR: *value = UART_LSR_THRE | UART_LSR_TEMT;      return true;   // transmitter empty, nothing received
@@ -52,13 +72,18 @@ static bool uart_write(void *ctx, uint32_t offset, uint32_t size, uint32_t value
 	uint8_t v = (uint8_t)value;
 	bool dlab = u->lcr & UART_LCR_DLAB;
 	switch (offset) {
-		case UART_THR:                                              // no data path yet: the byte is dropped
-			if (dlab) u->dll = v;
+		case UART_THR:
+			if (dlab) { u->dll = v; return true; }
+			if (!(u->mcr & UART_MCR_LOOP) && u->tx) u->tx(u->tx_ctx, v);   // in loopback the byte stays inside (step 7.3)
+			u->thre_pending = true;           // transmission is instant, so THRE is set again at once
 			return true;
 		case UART_IER:
-			if (dlab) u->dlm = v; else u->ier = v & UART_IER_MASK;
+			if (dlab) { u->dlm = v; return true; }
+			if (!(u->ier & UART_IER_ETBEI) && (v & UART_IER_ETBEI)) u->thre_pending = true;   // enabling it with THR empty raises it
+			u->ier = v & UART_IER_MASK;
 			return true;
 		case UART_FCR:                    // bit 0 enables the FIFOs; the other bits are only programmed if it is 1
+			if ((bool)(v & UART_FCR_ENABLE) != u->fifos_enabled) u->thre_pending = true;   // datasheet: immediate after FCR0 changes
 			u->fifos_enabled = v & UART_FCR_ENABLE;
 			if (u->fifos_enabled) {
 				u->rx_trigger = v >> 6;   // bits 1 and 2 (clear the FIFOs) have nothing to clear yet
