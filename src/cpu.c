@@ -12,6 +12,7 @@ void cpu_reset(CPU *cpu) {
 	*cpu = (CPU){0};
 	cpu->privilege_mode = PRV_M;
 	clint_reset(&cpu->clint);
+	plic_reset(&cpu->plic);
 }
 
 uint32_t cpu_read_reg(CPU *cpu, uint8_t index) {
@@ -39,16 +40,22 @@ void cpu_write_reg(CPU *cpu, uint8_t index, uint32_t value) {
 	cpu->regs[index] = value;
 }
 
-// The machine-level interrupts the platform is asserting. MEIP stays 0 until the PLIC exists (Milestone 8),
-// and then the supervisor external interrupt read of mip must also OR in the controller's signal
-// (machine.adoc:1436-1441).
-static uint32_t cpu_platform_pending(const CPU *cpu) {
+// The interrupts the platform is asserting: the CLINT's timer and software lines, and the PLIC's two outputs
+// (context 0 is MEIP, context 1 is SEIP). A read of mip returns SEIP as the software bit OR this signal
+// (machine.adoc:1436-1441). Asking the PLIC samples its gateways, so this is not const.
+static uint32_t cpu_platform_pending(CPU *cpu) {
 	uint32_t lines = 0;
 	if (clint_timer_pending(&cpu->clint)) {
 		lines |= INT_MTI;
 	}
 	if (clint_software_pending(&cpu->clint)) {
 		lines |= INT_MSI;
+	}
+	if (plic_context_pending(&cpu->plic, 0)) {
+		lines |= INT_MEI;
+	}
+	if (plic_context_pending(&cpu->plic, 1)) {
+		lines |= INT_SEI;
 	}
 	return lines;
 }
@@ -65,8 +72,8 @@ uint32_t cpu_read_csr(CPU *cpu, uint16_t addr){
 			return cpu->csr[CSR_MSTATUS] & SSTATUS_MASK;
 		case CSR_SIE:   // only delegated interrupts are visible
 			return cpu->csr[CSR_MIE] & cpu->csr[CSR_MIDELEG] & INT_S_ALL;
-		case CSR_SIP:
-			return cpu->csr[CSR_MIP] & cpu->csr[CSR_MIDELEG] & INT_S_ALL;
+		case CSR_SIP:   // SEIP shows the controller's signal too (supervisor.adoc:424-428)
+			return (cpu->csr[CSR_MIP] | cpu_platform_pending(cpu)) & cpu->csr[CSR_MIDELEG] & INT_S_ALL;
 		case CSR_MIP:   // the stored supervisor bits, and the machine bits as the platform drives them
 			return cpu->csr[CSR_MIP] | cpu_platform_pending(cpu);
 		case CSR_MSTATUSH:

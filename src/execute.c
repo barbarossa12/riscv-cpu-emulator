@@ -612,6 +612,13 @@ static uint32_t execute_fence(CPU *cpu, Memory *mem, DecodedInstruction *instr, 
 }
 
 
+// The value a csrrs, csrrc, csrrsi or csrrci modifies. It is what the instruction read, except for mip: its SEIP bit
+// reads as the software bit OR the interrupt controller's signal, but only the software bit takes part in the
+// read-modify-write (machine.adoc:1441-1443), so the stored mip is used.
+static uint32_t csr_modify_base(const CPU *cpu, uint16_t csr_addr, uint32_t read_value) {
+    return csr_addr == CSR_MIP ? cpu->csr[CSR_MIP] : read_value;
+}
+
 static uint32_t execute_system(CPU *cpu, Memory *mem, DecodedInstruction *instr, uint32_t pc) {
     (void)mem;
     uint16_t csr_addr = (uint16_t)(instr->imm & 0xFFF);
@@ -721,7 +728,7 @@ static uint32_t execute_system(CPU *cpu, Memory *mem, DecodedInstruction *instr,
             uint32_t rs1_val = cpu_read_reg(cpu, instr->rs1);
             uint32_t old = cpu_read_csr(cpu, csr_addr);
             if (instr->rs1 != 0) { // rs1 = x0: no write at all
-                cpu_write_csr(cpu, csr_addr, old | rs1_val);
+                cpu_write_csr(cpu, csr_addr, csr_modify_base(cpu, csr_addr, old) | rs1_val);
             }
             cpu_write_reg(cpu, instr->rd, old);
             return pc + instr->length;
@@ -731,7 +738,7 @@ static uint32_t execute_system(CPU *cpu, Memory *mem, DecodedInstruction *instr,
             uint32_t rs1_val = cpu_read_reg(cpu, instr->rs1);
             uint32_t old = cpu_read_csr(cpu, csr_addr);
             if (instr->rs1 != 0) { // rs1 = x0: no write at all
-                cpu_write_csr(cpu, csr_addr, old & ~rs1_val);
+                cpu_write_csr(cpu, csr_addr, csr_modify_base(cpu, csr_addr, old) & ~rs1_val);
             }
             cpu_write_reg(cpu, instr->rd, old);
             return pc + instr->length;
@@ -747,7 +754,7 @@ static uint32_t execute_system(CPU *cpu, Memory *mem, DecodedInstruction *instr,
         {
             uint32_t old = cpu_read_csr(cpu, csr_addr);
             if (instr->rs1 != 0) { // uimm = 0: no write at all
-                cpu_write_csr(cpu, csr_addr, old | (uint32_t)instr->rs1);
+                cpu_write_csr(cpu, csr_addr, csr_modify_base(cpu, csr_addr, old) | (uint32_t)instr->rs1);
             }
             cpu_write_reg(cpu, instr->rd, old);
             return pc + instr->length;
@@ -756,7 +763,7 @@ static uint32_t execute_system(CPU *cpu, Memory *mem, DecodedInstruction *instr,
         {
             uint32_t old = cpu_read_csr(cpu, csr_addr);
             if (instr->rs1 != 0) { // uimm = 0: no write at all
-                cpu_write_csr(cpu, csr_addr, old & ~(uint32_t)instr->rs1);
+                cpu_write_csr(cpu, csr_addr, csr_modify_base(cpu, csr_addr, old) & ~(uint32_t)instr->rs1);
             }
             cpu_write_reg(cpu, instr->rd, old);
             return pc + instr->length;
