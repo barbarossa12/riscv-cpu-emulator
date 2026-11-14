@@ -1,6 +1,8 @@
 #include "unity.h"
 #include "../src/mem.h"
 #include "../src/uart.h"
+#include "cpu_test_util.h"
+#include "../src/execute.h"
 
 #define RAM_BASE 0x80000000u
 
@@ -503,6 +505,335 @@ void test_i17_polled_print_loop(void) {
     TEST_ASSERT_EQUAL_MEMORY(text, sent, 3);
 }
 
+/* ---- J. Receive ---------------------------------------------------------------------------------- */
+
+static void ticks(unsigned n) { while (n--) uart_tick(&uart); }
+static void feed(unsigned n, uint8_t first) { for (unsigned i = 0; i < n; i++) uart_receive(&uart, (uint8_t)(first + i)); }
+static void fifo_on(uint8_t trigger_bits) { put(UART_FCR, 0x01 | (trigger_bits << 6)); }
+
+void test_j1_one_byte_fifo_off(void) {
+    TEST_ASSERT_TRUE(uart_receive(&uart, 0x41));
+    TEST_ASSERT_EQUAL_HEX32(0x61, reg(UART_LSR));
+    TEST_ASSERT_EQUAL_HEX32(0x41, reg(UART_RBR));
+    TEST_ASSERT_EQUAL_HEX32(0x60, reg(UART_LSR));
+}
+
+void test_j2_fifo_order_and_dr(void) {
+    fifo_on(0);
+    feed(3, 0x10);
+    TEST_ASSERT_EQUAL_HEX32(0x10, reg(UART_RBR));
+    TEST_ASSERT_EQUAL_HEX32(0x11, reg(UART_RBR));
+    TEST_ASSERT_EQUAL_HEX32(0x61, reg(UART_LSR));
+    TEST_ASSERT_EQUAL_HEX32(0x12, reg(UART_RBR));
+    TEST_ASSERT_EQUAL_HEX32(0x60, reg(UART_LSR));
+}
+
+void test_j3_empty_rbr_read(void) {
+    TEST_ASSERT_EQUAL_HEX32(0, reg(UART_RBR));
+    TEST_ASSERT_EQUAL_HEX32(0x60, reg(UART_LSR));
+}
+
+void test_j4_overrun_fifo_off(void) {
+    uart_receive(&uart, 0x11);
+    TEST_ASSERT_FALSE(uart_receive(&uart, 0x22));
+    TEST_ASSERT_EQUAL_HEX32(0x63, reg(UART_LSR));
+    TEST_ASSERT_EQUAL_HEX32(0x22, reg(UART_RBR));
+    TEST_ASSERT_EQUAL_HEX32(0x60, reg(UART_LSR));
+}
+
+void test_j5_overrun_fifo_on(void) {
+    fifo_on(0);
+    TEST_ASSERT_EQUAL_UINT(16, uart_rx_space(&uart));
+    for (unsigned i = 0; i < 16; i++) TEST_ASSERT_TRUE(uart_receive(&uart, (uint8_t)i));
+    TEST_ASSERT_EQUAL_UINT(0, uart_rx_space(&uart));
+    TEST_ASSERT_FALSE(uart_receive(&uart, 0xEE));
+    for (unsigned i = 0; i < 16; i++) TEST_ASSERT_EQUAL_HEX32(i, reg(UART_RBR));
+    TEST_ASSERT_EQUAL_HEX32(0x62, reg(UART_LSR));            // empty again, OE still set
+}
+
+void test_j6_lsr_read_clears_oe(void) {
+    uart_receive(&uart, 1);
+    uart_receive(&uart, 2);
+    TEST_ASSERT_EQUAL_HEX32(0x02, reg(UART_LSR) & 0x02);
+    TEST_ASSERT_EQUAL_HEX32(0x00, reg(UART_LSR) & 0x02);
+}
+
+void test_j7_dr_and_oe_together(void) {
+    uart_receive(&uart, 1);
+    uart_receive(&uart, 2);
+    TEST_ASSERT_EQUAL_HEX32(0x63, reg(UART_LSR));
+}
+
+void test_j8_trigger_levels(void) {
+    static const unsigned level[4] = {1, 4, 8, 14};
+    for (int t = 0; t < 4; t++) {
+        uart_reset(&uart);
+        put(UART_IER, UART_IER_ERBFI);
+        fifo_on((uint8_t)t);
+        feed(level[t] - 1, 0);
+        if (level[t] > 1) TEST_ASSERT_EQUAL_HEX32(0xC1, reg(UART_IIR));
+        uart_receive(&uart, 0);
+        TEST_ASSERT_EQUAL_HEX32(0xC4, reg(UART_IIR));
+    }
+}
+
+void test_j9_rda_drops_below_trigger(void) {
+    put(UART_IER, UART_IER_ERBFI);
+    fifo_on(1);                                              // 4 bytes
+    feed(4, 0);
+    TEST_ASSERT_EQUAL_HEX32(0xC4, reg(UART_IIR));
+    (void)reg(UART_RBR);
+    TEST_ASSERT_EQUAL_HEX32(0xC1, reg(UART_IIR));
+}
+
+void test_j10_rda_fifo_off(void) {
+    put(UART_IER, UART_IER_ERBFI);
+    uart_receive(&uart, 7);
+    TEST_ASSERT_EQUAL_HEX32(0x04, reg(UART_IIR));
+}
+
+void test_j11_erbfi_clear_hides_rda_and_timeout(void) {
+    fifo_on(2);
+    uart_receive(&uart, 7);
+    ticks(UART_TIMEOUT_CYCLES);
+    TEST_ASSERT_EQUAL_HEX32(0xC1, reg(UART_IIR));
+    feed(8, 0);
+    TEST_ASSERT_EQUAL_HEX32(0xC1, reg(UART_IIR));
+}
+
+void test_j12_timeout_after_exact_idle(void) {
+    put(UART_IER, UART_IER_ERBFI);
+    fifo_on(2);                                              // trigger 8
+    uart_receive(&uart, 7);
+    ticks(UART_TIMEOUT_CYCLES - 1);
+    TEST_ASSERT_EQUAL_HEX32(0xC1, reg(UART_IIR));
+    ticks(1);
+    TEST_ASSERT_EQUAL_HEX32(0xCC, reg(UART_IIR));
+}
+
+void test_j13_read_clears_timeout(void) {
+    put(UART_IER, UART_IER_ERBFI);
+    fifo_on(2);
+    uart_receive(&uart, 7);
+    ticks(UART_TIMEOUT_CYCLES);
+    (void)reg(UART_RBR);
+    TEST_ASSERT_EQUAL_HEX32(0xC1, reg(UART_IIR));
+}
+
+void test_j14_timeout_returns_after_a_read(void) {
+    put(UART_IER, UART_IER_ERBFI);
+    fifo_on(2);
+    feed(2, 0);
+    ticks(UART_TIMEOUT_CYCLES);
+    (void)reg(UART_RBR);
+    TEST_ASSERT_EQUAL_HEX32(0xC1, reg(UART_IIR));
+    ticks(UART_TIMEOUT_CYCLES - 1);
+    TEST_ASSERT_EQUAL_HEX32(0xC1, reg(UART_IIR));
+    ticks(1);
+    TEST_ASSERT_EQUAL_HEX32(0xCC, reg(UART_IIR));
+}
+
+void test_j15_arrival_restarts_timeout(void) {
+    put(UART_IER, UART_IER_ERBFI);
+    fifo_on(2);
+    uart_receive(&uart, 1);
+    ticks(UART_TIMEOUT_CYCLES);
+    uart_receive(&uart, 2);
+    TEST_ASSERT_EQUAL_HEX32(0xC1, reg(UART_IIR));
+    ticks(UART_TIMEOUT_CYCLES);
+    TEST_ASSERT_EQUAL_HEX32(0xCC, reg(UART_IIR));
+}
+
+void test_j16_no_timeout_fifo_off(void) {
+    put(UART_IER, UART_IER_ERBFI);
+    uart_receive(&uart, 1);
+    (void)reg(UART_IIR);
+    put(UART_FCR, 0x00);
+    ticks(3 * UART_TIMEOUT_CYCLES);
+    TEST_ASSERT_EQUAL_HEX32(0x04, reg(UART_IIR));            // the data interrupt, never the timeout
+}
+
+void test_j17_line_status_interrupt(void) {
+    put(UART_IER, UART_IER_ELSI);
+    uart_receive(&uart, 1);
+    uart_receive(&uart, 2);
+    TEST_ASSERT_EQUAL_HEX32(0x06, reg(UART_IIR));
+    TEST_ASSERT_TRUE(uart_interrupt_pending(&uart));
+    (void)reg(UART_LSR);
+    TEST_ASSERT_EQUAL_HEX32(0x01, reg(UART_IIR));
+    TEST_ASSERT_FALSE(uart_interrupt_pending(&uart));
+}
+
+void test_j18_priority_order(void) {
+    put(UART_IER, 0x0F);                                     // THRE is raised by this write
+    (void)reg(UART_IIR);                                     // consume it
+    put(UART_MCR, UART_MCR_LOOP);                            // modem change flags
+    uart_receive(&uart, 1);
+    uart_receive(&uart, 2);                                  // data and overrun
+    put(UART_IER, 0x00);
+    put(UART_IER, 0x0F);                                     // THRE again
+    TEST_ASSERT_EQUAL_HEX32(0x06, reg(UART_IIR));            // line status first
+    (void)reg(UART_LSR);
+    TEST_ASSERT_EQUAL_HEX32(0x04, reg(UART_IIR));            // then received data
+    (void)reg(UART_RBR);
+    TEST_ASSERT_EQUAL_HEX32(0x02, reg(UART_IIR));            // then THRE (this read clears it)
+    TEST_ASSERT_EQUAL_HEX32(0x00, reg(UART_IIR));            // then modem status
+    (void)reg(UART_MSR);
+    TEST_ASSERT_EQUAL_HEX32(0x01, reg(UART_IIR));
+}
+
+void test_j19_modem_status_interrupt(void) {
+    put(UART_IER, UART_IER_EDSSI);
+    put(UART_MCR, UART_MCR_LOOP);                            // CTS, DSR and DCD drop
+    TEST_ASSERT_EQUAL_HEX32(0x00, reg(UART_IIR));
+    TEST_ASSERT_TRUE(uart_interrupt_pending(&uart));
+    (void)reg(UART_MSR);
+    TEST_ASSERT_EQUAL_HEX32(0x01, reg(UART_IIR));
+}
+
+void test_j20_fcr_bit0_change_clears_fifo(void) {
+    fifo_on(0);
+    feed(3, 0);
+    put(UART_FCR, 0x00);
+    TEST_ASSERT_EQUAL_HEX32(0x60, reg(UART_LSR));
+    fifo_on(0);
+    feed(3, 0);
+    put(UART_FCR, 0x01);                                     // bit 0 unchanged: nothing cleared
+    TEST_ASSERT_EQUAL_HEX32(0x61, reg(UART_LSR));
+}
+
+void test_j21_fcr_bit1_clears_fifo_keeps_oe(void) {
+    fifo_on(0);
+    feed(17, 0);                                             // overrun
+    put(UART_FCR, 0x03);
+    TEST_ASSERT_EQUAL_HEX32(0x62, reg(UART_LSR));            // empty, OE kept
+    TEST_ASSERT_EQUAL_UINT(16, uart_rx_space(&uart));
+}
+
+void test_j22_loopback_receives_thr(void) {
+    hook_up();
+    put(UART_MCR, UART_MCR_LOOP);
+    put(UART_THR, 0x41);
+    TEST_ASSERT_EQUAL_UINT(0, sent_n);
+    TEST_ASSERT_EQUAL_HEX32(0x41, reg(UART_RBR));
+}
+
+void test_j23_loopback_thre_and_dr(void) {
+    put(UART_MCR, UART_MCR_LOOP);
+    put(UART_IER, UART_IER_ETBEI);
+    (void)reg(UART_IIR);
+    put(UART_THR, 0x41);
+    TEST_ASSERT_EQUAL_HEX32(0x61, reg(UART_LSR));
+    TEST_ASSERT_EQUAL_HEX32(0x02, reg(UART_IIR));
+}
+
+void test_j24_loopback_overrun(void) {
+    fifo_on(0);
+    put(UART_MCR, UART_MCR_LOOP);
+    for (int i = 0; i < 17; i++) put(UART_THR, (uint8_t)i);
+    TEST_ASSERT_EQUAL_HEX32(0x02, reg(UART_LSR) & 0x02);
+    TEST_ASSERT_EQUAL_HEX32(0x00, reg(UART_RBR));            // the first byte survived
+}
+
+void test_j25_linux_loopback_self_test(void) {
+    put(UART_MCR, UART_MCR_LOOP);
+    put(UART_THR, 0x5A);
+    TEST_ASSERT_EQUAL_HEX32(1, reg(UART_LSR) & UART_LSR_DR);
+    TEST_ASSERT_EQUAL_HEX32(0x5A, reg(UART_RBR));
+    put(UART_MCR, 0x00);
+    TEST_ASSERT_EQUAL_HEX32(0, reg(UART_LSR) & UART_LSR_DR);
+}
+
+void test_j26_pending_follows_iir(void) {
+    put(UART_IER, UART_IER_ERBFI);
+    TEST_ASSERT_FALSE(uart_interrupt_pending(&uart));
+    uart_receive(&uart, 1);
+    TEST_ASSERT_TRUE(uart_interrupt_pending(&uart));
+    (void)reg(UART_RBR);
+    TEST_ASSERT_FALSE(uart_interrupt_pending(&uart));
+}
+
+void test_j27_mem_tick_calls_device_tick(void) {
+    uart_receive(&uart, 1);
+    TEST_ASSERT_EQUAL_UINT32(0, uart.rx_idle);
+    mem_tick(&mem);
+    mem_tick(&mem);
+    TEST_ASSERT_EQUAL_UINT32(2, uart.rx_idle);
+    Memory other;
+    mem_init_at(&other, RAM_BASE, 0x1000);                   // no devices: nothing to call
+    mem_tick(&other);
+    mem_free(&other);
+}
+
+static unsigned counted;
+static void count_tick(void *ctx) { (void)ctx; counted++; }
+
+void test_j27b_every_device_with_a_tick_is_called(void) {
+    Memory two;
+    Uart second;
+    uart_reset(&second);
+    mem_init_at(&two, RAM_BASE, 0x1000);
+    mem_add_device(&two, (Device){ .base = 0x20000000u, .size = 0x10, .sizes = DEV_ACCESS_32, .tick = count_tick });
+    mem_add_device(&two, (Device){ .base = 0x21000000u, .size = 0x10, .sizes = DEV_ACCESS_32 });   // no tick: skipped
+    mem_add_device(&two, uart_device(&second));              // after the others
+    counted = 0;
+    uart_receive(&second, 1);
+    mem_tick(&two);
+    mem_tick(&two);
+    TEST_ASSERT_EQUAL_UINT(2, counted);
+    TEST_ASSERT_EQUAL_UINT32(2, second.rx_idle);
+    mem_free(&two);
+}
+
+void test_j31_old_trigger_does_not_apply_without_fifos(void) {
+    put(UART_IER, UART_IER_ERBFI);
+    fifo_on(2);                                              // trigger 8 programmed
+    put(UART_FCR, 0x00);                                     // FIFOs off again
+    uart_receive(&uart, 1);
+    TEST_ASSERT_EQUAL_HEX32(0x04, reg(UART_IIR));            // one character is enough
+}
+
+void test_j28_cpu_step_ticks_devices(void) {
+    CPU cpu;
+    test_cpu_reset_in_mode(&cpu, PRV_M);
+    for (uint32_t i = 0; i < 0x40; i += 4) mem_write32(&mem, RAM_BASE + i, 0x00000013);   // NOPs
+    cpu.pc = RAM_BASE;
+    uart_receive(&uart, 1);
+    for (int i = 0; i < 10; i++) cpu_step(&cpu, &mem);
+    TEST_ASSERT_EQUAL_UINT32(10, uart.rx_idle);
+}
+
+void test_j29_adjustable_timeout(void) {
+    uart_set_timeout(&uart, 100);
+    put(UART_IER, UART_IER_ERBFI);
+    fifo_on(2);
+    uart_receive(&uart, 1);
+    ticks(99);
+    TEST_ASSERT_EQUAL_HEX32(0xC1, reg(UART_IIR));
+    ticks(1);
+    TEST_ASSERT_EQUAL_HEX32(0xCC, reg(UART_IIR));
+}
+
+void test_j30_timeout_survives_reset_and_defaults(void) {
+    uart_set_timeout(&uart, 100);
+    uart_reset(&uart);
+    put(UART_IER, UART_IER_ERBFI);
+    fifo_on(2);
+    uart_receive(&uart, 1);
+    ticks(100);
+    TEST_ASSERT_EQUAL_HEX32(0xCC, reg(UART_IIR));
+    uart_set_timeout(&uart, 0);                              // back to the default
+    TEST_ASSERT_EQUAL_UINT32(UART_TIMEOUT_CYCLES, uart.rx_timeout);
+    uart_reset(&uart);
+    put(UART_IER, UART_IER_ERBFI);
+    fifo_on(2);
+    uart_receive(&uart, 1);
+    ticks(UART_TIMEOUT_CYCLES - 1);
+    TEST_ASSERT_EQUAL_HEX32(0xC1, reg(UART_IIR));
+    ticks(1);
+    TEST_ASSERT_EQUAL_HEX32(0xCC, reg(UART_IIR));
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_a1_reset_values);
@@ -564,5 +895,37 @@ int main(void) {
     RUN_TEST(test_i15_reset_keeps_hook_and_clears_latch);
     RUN_TEST(test_i16_linux_thre_probe);
     RUN_TEST(test_i17_polled_print_loop);
+    RUN_TEST(test_j1_one_byte_fifo_off);
+    RUN_TEST(test_j2_fifo_order_and_dr);
+    RUN_TEST(test_j3_empty_rbr_read);
+    RUN_TEST(test_j4_overrun_fifo_off);
+    RUN_TEST(test_j5_overrun_fifo_on);
+    RUN_TEST(test_j6_lsr_read_clears_oe);
+    RUN_TEST(test_j7_dr_and_oe_together);
+    RUN_TEST(test_j8_trigger_levels);
+    RUN_TEST(test_j9_rda_drops_below_trigger);
+    RUN_TEST(test_j10_rda_fifo_off);
+    RUN_TEST(test_j11_erbfi_clear_hides_rda_and_timeout);
+    RUN_TEST(test_j12_timeout_after_exact_idle);
+    RUN_TEST(test_j13_read_clears_timeout);
+    RUN_TEST(test_j14_timeout_returns_after_a_read);
+    RUN_TEST(test_j15_arrival_restarts_timeout);
+    RUN_TEST(test_j16_no_timeout_fifo_off);
+    RUN_TEST(test_j17_line_status_interrupt);
+    RUN_TEST(test_j18_priority_order);
+    RUN_TEST(test_j19_modem_status_interrupt);
+    RUN_TEST(test_j20_fcr_bit0_change_clears_fifo);
+    RUN_TEST(test_j21_fcr_bit1_clears_fifo_keeps_oe);
+    RUN_TEST(test_j22_loopback_receives_thr);
+    RUN_TEST(test_j23_loopback_thre_and_dr);
+    RUN_TEST(test_j24_loopback_overrun);
+    RUN_TEST(test_j25_linux_loopback_self_test);
+    RUN_TEST(test_j26_pending_follows_iir);
+    RUN_TEST(test_j27_mem_tick_calls_device_tick);
+    RUN_TEST(test_j27b_every_device_with_a_tick_is_called);
+    RUN_TEST(test_j28_cpu_step_ticks_devices);
+    RUN_TEST(test_j29_adjustable_timeout);
+    RUN_TEST(test_j30_timeout_survives_reset_and_defaults);
+    RUN_TEST(test_j31_old_trigger_does_not_apply_without_fifos);
     return UNITY_END();
 }
