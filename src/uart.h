@@ -95,6 +95,10 @@ void uart_set_timeout(Uart *u, uint32_t cycles);   // 0 restores the default; su
 bool uart_receive(Uart *u, uint8_t byte);          // a character arrives; false if it was lost to an overrun
 unsigned uart_rx_space(const Uart *u);             // how many more characters fit
 void uart_tick(Uart *u);                           // one cpu step (the device tick hook)
+// Idle time (WFI): the steps until the receive timeout comes up by itself, UINT64_MAX if it cannot (no character, FIFOs off,
+// or already up), and the same number of steps passing without any instruction. Capped at the timeout.
+uint64_t uart_idle_horizon(const Uart *u);
+void uart_idle(Uart *u, uint64_t cycles);
 // The UART's interrupt output (INTR): a level signal, high while any enabled cause is pending, i.e. while IIR bit 0 is 0
 // (datasheet, INTR pin). It has no side effects, and OUT2 does not gate it. The PLIC reads it as source 10.
 bool uart_interrupt_pending(const Uart *u);    // the interrupt output line (THRE only until the receive side exists)

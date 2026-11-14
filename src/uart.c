@@ -47,6 +47,17 @@ void uart_tick(Uart *u) {
 	if (u->rx_idle < u->rx_timeout) u->rx_idle++;
 }
 
+uint64_t uart_idle_horizon(const Uart *u) {
+	if (!u->fifos_enabled || u->rx_count == 0 || u->rx_idle >= u->rx_timeout) return UINT64_MAX;
+	return u->rx_timeout - u->rx_idle;
+}
+
+void uart_idle(Uart *u, uint64_t cycles) {
+	if (u->rx_idle >= u->rx_timeout) return;      // uart_set_timeout can lower the timeout below rx_idle
+	uint64_t left = u->rx_timeout - u->rx_idle;
+	u->rx_idle += (uint32_t)(cycles < left ? cycles : left);
+}
+
 static void rx_clear(Uart *u) {
 	u->rx_head = 0;
 	u->rx_count = 0;
@@ -157,8 +168,11 @@ static bool uart_write(void *ctx, uint32_t offset, uint32_t size, uint32_t value
 }
 
 static void uart_tick_hook(void *ctx) { uart_tick(ctx); }
+static uint64_t uart_idle_horizon_hook(void *ctx) { return uart_idle_horizon(ctx); }
+static void uart_idle_hook(void *ctx, uint64_t cycles) { uart_idle(ctx, cycles); }
 
 Device uart_device(Uart *u) {
 	return (Device){ .base = UART_BASE, .size = UART_SIZE, .sizes = DEV_ACCESS_8,
-	                 .read = uart_read, .write = uart_write, .ctx = u, .tick = uart_tick_hook };
+	                 .read = uart_read, .write = uart_write, .ctx = u, .tick = uart_tick_hook,
+	                 .idle_horizon = uart_idle_horizon_hook, .idle = uart_idle_hook };
 }
