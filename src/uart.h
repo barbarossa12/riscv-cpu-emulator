@@ -25,7 +25,10 @@
 #define UART_SCR 7
 
 #define UART_IER_MASK     0x0Fu   // bits 7:4 always read 0
+#define UART_IER_ERBFI    0x01u   // received data available (and timeout) interrupt enable
 #define UART_IER_ETBEI    0x02u   // transmitter holding register empty interrupt enable
+#define UART_IER_ELSI     0x04u   // receiver line status interrupt enable
+#define UART_IER_EDSSI    0x08u   // modem status interrupt enable
 #define UART_LCR_DLAB     0x80u
 #define UART_MCR_DTR      0x01u
 #define UART_MCR_RTS      0x02u
@@ -38,6 +41,17 @@
 #define UART_FCR_CLEAR_TX 0x04u
 #define UART_IIR_NO_INT   0x01u
 #define UART_IIR_THRE     0x02u   // cause: transmitter holding register empty
+#define UART_IIR_RDA      0x04u   // cause: received data available (trigger level reached)
+#define UART_IIR_LINE     0x06u   // cause: receiver line status
+#define UART_IIR_TIMEOUT  0x0Cu   // cause: character timeout
+#define UART_IIR_MODEM    0x00u   // cause: modem status
+#define UART_LSR_OE       0x02u
+
+#define UART_FIFO_SIZE    16
+// How long a character may sit unread with nothing arriving before the timeout interrupt, in cpu steps. The datasheet says
+// 4 character times; with the baud rate ignored this is 4 characters of 10 bits at 115200 baud on the nominal 100 MHz
+// clock. A default: the host can change it with uart_set_timeout.
+#define UART_TIMEOUT_CYCLES 35000u
 #define UART_IIR_FIFOS    0xC0u   // bits 7:6 read 1 while the FIFOs are enabled
 #define UART_LSR_DR       0x01u
 #define UART_LSR_THRE     0x20u
@@ -66,11 +80,20 @@ typedef struct Uart {
 	uint8_t msr_inputs;      // the status bits 7:4 as last seen
 	uint8_t msr_delta;       // the change flags, bits 3:0
 	bool    thre_pending;    // the THRE interrupt condition (latched; shown in IIR only while ETBEI is set)
+	uint8_t  rx_fifo[UART_FIFO_SIZE];   // received characters (capacity 1 with the FIFOs off)
+	uint8_t  rx_head, rx_count;
+	bool     rx_overrun;     // LSR.OE, cleared by reading LSR
+	uint32_t rx_idle;        // steps since a character arrived or was read; stops at rx_timeout
+	uint32_t rx_timeout;     // steps before the timeout interrupt (0 is replaced by the default)
 	UartTxFn tx;             // host output for transmitted bytes; NULL drops them
 	void   *tx_ctx;
 } Uart;
 
 void uart_reset(Uart *u);                      // keeps the host output hook
 void uart_set_tx(Uart *u, UartTxFn fn, void *ctx);
+void uart_set_timeout(Uart *u, uint32_t cycles);   // 0 restores the default; survives uart_reset
+bool uart_receive(Uart *u, uint8_t byte);          // a character arrives; false if it was lost to an overrun
+unsigned uart_rx_space(const Uart *u);             // how many more characters fit
+void uart_tick(Uart *u);                           // one cpu step (the device tick hook)
 bool uart_interrupt_pending(const Uart *u);    // the interrupt output line (THRE only until the receive side exists)
 Device uart_device(Uart *u);   // for mem_add_device
