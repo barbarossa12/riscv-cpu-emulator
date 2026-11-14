@@ -108,7 +108,9 @@ if(RISCV_TESTS)
                      ${CMAKE_SOURCE_DIR}/tests/asm/time_gating.S
                      ${CMAKE_SOURCE_DIR}/tests/asm/uart_hello.S
                      ${CMAKE_SOURCE_DIR}/tests/asm/uart_probe.S
-                     ${CMAKE_SOURCE_DIR}/tests/asm/uart_faults.S)
+                     ${CMAKE_SOURCE_DIR}/tests/asm/uart_faults.S
+                     ${CMAKE_SOURCE_DIR}/tests/asm/uart_timeout.S
+                     ${CMAKE_SOURCE_DIR}/tests/asm/uart_echo.S)
     add_test(NAME riscv-tests.build-asm
              COMMAND "${CMAKE_SOURCE_DIR}/scripts/build-asm-tests.sh"
                      "${RISCV_TESTS_SRC_DIR}" "${RISCV_TESTS_BUILD_DIR}" ${_asm_sources})
@@ -161,6 +163,36 @@ if(RISCV_TESTS)
         set_tests_properties(riscv-tests.${uart_test} PROPERTIES
             FIXTURES_REQUIRED riscv-tests-elfs TIMEOUT 60 LABELS riscv-tests)
     endforeach()
+
+    # The host side of the UART, through the real emulator: the receive timeout set from the environment (and, without
+    # the variable, the long default, so the same program fails), a line piped to stdin and echoed back through a 16-byte
+    # FIFO, stdin ignored unless asked for, and a bad timeout value warned about and ignored.
+    add_test(NAME riscv-tests.uart-timeout
+             COMMAND riscv_emu "${RISCV_TESTS_BUILD_DIR}/uart_timeout")
+    set_tests_properties(riscv-tests.uart-timeout PROPERTIES
+        FIXTURES_REQUIRED riscv-tests-elfs TIMEOUT 60 LABELS riscv-tests
+        ENVIRONMENT "RISCV_EMU_UART_TIMEOUT=200"
+        PASS_REGULAR_EXPRESSION "PASS \\(")
+    add_test(NAME riscv-tests.uart-timeout-default-is-slow
+             COMMAND riscv_emu "${RISCV_TESTS_BUILD_DIR}/uart_timeout")
+    set_tests_properties(riscv-tests.uart-timeout-default-is-slow PROPERTIES
+        FIXTURES_REQUIRED riscv-tests-elfs TIMEOUT 60 LABELS riscv-tests
+        PASS_REGULAR_EXPRESSION "FAIL: test")
+    add_test(NAME riscv-tests.uart-echo
+             COMMAND sh -c "printf '0123456789abcdefghij0123456789ABCDEFGHIJ\\n' | RISCV_EMU_UART_STDIN=1 $<TARGET_FILE:riscv_emu> ${RISCV_TESTS_BUILD_DIR}/uart_echo")
+    set_tests_properties(riscv-tests.uart-echo PROPERTIES
+        FIXTURES_REQUIRED riscv-tests-elfs TIMEOUT 60 LABELS riscv-tests
+        PASS_REGULAR_EXPRESSION "0123456789abcdefghij0123456789ABCDEFGHIJ.*PASS \\(")
+    add_test(NAME riscv-tests.uart-echo-stdin-off-by-default
+             COMMAND sh -c "printf 'abc\\n' | $<TARGET_FILE:riscv_emu> ${RISCV_TESTS_BUILD_DIR}/uart_echo 20000")
+    set_tests_properties(riscv-tests.uart-echo-stdin-off-by-default PROPERTIES
+        FIXTURES_REQUIRED riscv-tests-elfs TIMEOUT 60 LABELS riscv-tests
+        PASS_REGULAR_EXPRESSION "TIMEOUT after 20000 instructions")
+    add_test(NAME riscv-tests.uart-timeout-env-bad
+             COMMAND sh -c "RISCV_EMU_UART_TIMEOUT=abc $<TARGET_FILE:riscv_emu> ${RISCV_TESTS_BUILD_DIR}/uart_hello 2>&1")
+    set_tests_properties(riscv-tests.uart-timeout-env-bad PROPERTIES
+        FIXTURES_REQUIRED riscv-tests-elfs TIMEOUT 60 LABELS riscv-tests
+        PASS_REGULAR_EXPRESSION "ignoring RISCV_EMU_UART_TIMEOUT=abc.*PASS \\(")
 
     foreach(name ${_names})
         add_test(NAME riscv-tests.${name}
