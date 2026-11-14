@@ -137,6 +137,11 @@ typedef struct CPU {
 	Clint    clint;     // the core-local timer and software interrupt, memory-mapped at CLINT_BASE
 	Plic     plic;      // the platform-level interrupt controller, memory-mapped at PLIC_BASE
 
+	// Optional, set by the host after cpu_reset: WFI calls it before letting idle time pass, so the host can look for
+	// input that arrived. True means it delivered something to a device, so WFI does not jump time this once.
+	bool   (*idle_poll)(void *ctx);
+	void    *idle_poll_ctx;
+
 	bool     lr_valid;  // a load reservation is held (LR.W sets it; any SC.W clears it)
 	uint32_t lr_addr;   // address of the reserved word
 

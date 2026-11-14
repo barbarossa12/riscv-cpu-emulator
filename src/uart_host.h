@@ -23,7 +23,7 @@ typedef struct {
 
 void host_input_init(HostInput *in, int fd);
 // Moves at most uart_rx_space() bytes, so the host never causes an overrun, and never waits for data.
-void host_input_poll(HostInput *in, Uart *u);
+unsigned host_input_poll(HostInput *in, Uart *u);   // returns how many bytes it delivered
 
 // Strict unsigned decimal parse for the environment options: digits only, no sign, no spaces, must fit 32 bits.
 bool uart_host_parse_u32(const char *s, uint32_t *out);

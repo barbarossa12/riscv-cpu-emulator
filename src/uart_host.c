@@ -14,16 +14,18 @@ void host_input_init(HostInput *in, int fd) {
 	in->eof = false;
 }
 
-void host_input_poll(HostInput *in, Uart *u) {
-	if (in->fd < 0 || in->eof) return;
+unsigned host_input_poll(HostInput *in, Uart *u) {
+	if (in->fd < 0 || in->eof) return 0;
 	unsigned room = uart_rx_space(u);
-	if (room == 0) return;                      // leave the bytes in the pipe or terminal: no overrun
+	if (room == 0) return 0;                    // leave the bytes in the pipe or terminal: no overrun
 	struct pollfd p = { .fd = in->fd, .events = POLLIN };
-	if (poll(&p, 1, 0) <= 0) return;            // nothing to read right now (timeout 0: never waits)
+	if (poll(&p, 1, 0) <= 0) return 0;          // nothing to read right now (timeout 0: never waits)
 	uint8_t buf[UART_FIFO_SIZE];
 	ssize_t n = read(in->fd, buf, room < sizeof buf ? room : sizeof buf);
 	if (n == 0) in->eof = true;                 // end of input: stop polling
+	if (n <= 0) return 0;
 	for (ssize_t i = 0; i < n; i++) uart_receive(u, buf[i]);
+	return (unsigned)n;
 }
 
 bool uart_host_parse_u32(const char *s, uint32_t *out) {

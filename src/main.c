@@ -29,6 +29,13 @@ static bool uart_line(void *uart) {
 	return uart_interrupt_pending(uart);
 }
 
+/* WFI looks at stdin first (B2): input that arrived is delivered to the UART and WFI does not jump time this once. */
+typedef struct { HostInput *in; Uart *uart; } IdlePoll;
+static bool idle_poll(void *ctx) {
+	IdlePoll *p = ctx;
+	return host_input_poll(p->in, p->uart) > 0;
+}
+
 static int usage(const char *prog) {
 	fprintf(stderr, "usage: %s <program.elf> [max-instructions]\n", prog);
 	return EXIT_LOAD_ERROR;
@@ -113,6 +120,9 @@ int main(int argc, char **argv) {
 	plic_set_source(&cpu.plic, UART_PLIC_SOURCE, uart_line, &uart);   // PLIC source 10, as the device tree will say
 	HostInput uart_in;
 	host_input_init(&uart_in, getenv("RISCV_EMU_UART_STDIN") ? STDIN_FILENO : -1);
+	IdlePoll idle = { &uart_in, &uart };
+	cpu.idle_poll = idle_poll;
+	cpu.idle_poll_ctx = &idle;
 
 	for (unsigned long long executed = 0; executed < max_instrs; executed++) {
 		cpu_step(&cpu, &mem);
