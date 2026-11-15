@@ -40,3 +40,20 @@ target_link_libraries(riscv_emu PRIVATE riscv_core)
 
 enable_testing()
 add_subdirectory(tests)
+
+# The device tree. dtc prints nothing for a clean tree, so any output on stderr (a warning) fails the build.
+find_program(DTC dtc)
+find_program(FDTGET fdtget)
+if(DTC AND FDTGET)
+    set(RISCV_EMU_DTB ${CMAKE_BINARY_DIR}/riscv-emu.dtb)
+    add_custom_command(
+        OUTPUT ${RISCV_EMU_DTB}
+        COMMAND sh -c "${DTC} -I dts -O dtb -o ${RISCV_EMU_DTB} ${CMAKE_SOURCE_DIR}/dts/riscv-emu.dts 2> ${RISCV_EMU_DTB}.log; rc=$?; cat ${RISCV_EMU_DTB}.log; test $rc -eq 0 -a ! -s ${RISCV_EMU_DTB}.log || { rm -f ${RISCV_EMU_DTB}; exit 1; }"
+        DEPENDS ${CMAKE_SOURCE_DIR}/dts/riscv-emu.dts
+        VERBATIM)
+    add_custom_target(riscv_emu_dtb ALL DEPENDS ${RISCV_EMU_DTB})
+    add_test(NAME dts-matches-headers
+             COMMAND sh ${CMAKE_SOURCE_DIR}/tests/check-dts.sh ${RISCV_EMU_DTB} ${CMAKE_SOURCE_DIR})
+else()
+    message(STATUS "dtc or fdtget not found: the device tree is not built or checked")
+endif()
