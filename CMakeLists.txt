@@ -27,6 +27,8 @@ add_library(riscv_core
     src/plic.c
     src/uart.c
     src/uart_host.c
+    src/finisher.c
+    src/boot.c
     src/decode.c
     src/compressed.c
     src/execute.c
@@ -39,7 +41,6 @@ add_executable(riscv_emu src/main.c)
 target_link_libraries(riscv_emu PRIVATE riscv_core)
 
 enable_testing()
-add_subdirectory(tests)
 
 # The device tree. dtc prints nothing for a clean tree, so any output on stderr (a warning) fails the build.
 find_program(DTC dtc)
@@ -57,3 +58,5 @@ if(DTC AND FDTGET)
 else()
     message(STATUS "dtc or fdtget not found: the device tree is not built or checked")
 endif()
+
+add_subdirectory(tests)

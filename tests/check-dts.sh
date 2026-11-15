@@ -67,6 +67,19 @@ check "clint interrupts-extended" "$(get u /soc/clint@2000000 interrupts-extende
 check "plic interrupts-extended (context 0 = M, 1 = S)" "$(get u /soc/plic@c000000 interrupts-extended)" "$intc 11 $intc 9"
 check "serial interrupt-parent is the plic" "$(get u /soc/serial@10000000 interrupt-parent)" "$(get u /soc/plic@c000000 phandle)"
 
+# The finisher, and the two nodes through which OpenSBI's syscon drivers write to it (the value written is what src/finisher.h decodes)
+check_reg "finisher" /soc/test@100000 "$(define finisher.h FINISHER_BASE)" "$(define finisher.h FINISHER_SIZE)"
+check "finisher compatible" "$(get s /soc/test@100000 compatible)" "sifive,test1 sifive,test0 syscon"
+test_phandle=$(get u /soc/test@100000 phandle)
+check "poweroff compatible" "$(get s /poweroff compatible)" "syscon-poweroff"
+check "poweroff regmap" "$(get u /poweroff regmap)" "$test_phandle"
+check "poweroff offset" "$(get u /poweroff offset)" "0"
+check "poweroff value" "$(get x /poweroff value)" "$(hex "$(define finisher.h FINISHER_PASS)")"
+check "reboot compatible" "$(get s /reboot compatible)" "syscon-reboot"
+check "reboot regmap" "$(get u /reboot regmap)" "$test_phandle"
+check "reboot offset" "$(get u /reboot offset)" "0"
+check "reboot value" "$(get x /reboot value)" "$(hex "$(define finisher.h FINISHER_RESET)")"
+
 check "serial compatible" "$(get s /soc/serial@10000000 compatible)" "ns16550a"
 check "plic compatible" "$(get s /soc/plic@c000000 compatible)" "sifive,plic-1.0.0 riscv,plic0"
 check "clint compatible" "$(get s /soc/clint@2000000 compatible)" "sifive,clint0 riscv,clint0"

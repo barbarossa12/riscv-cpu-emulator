@@ -62,6 +62,14 @@ add_executable(test_plic test_plic.c)
 target_link_libraries(test_plic PRIVATE riscv_core unity)
 add_test(NAME test_plic COMMAND test_plic)
 
+add_executable(test_finisher test_finisher.c)
+target_link_libraries(test_finisher PRIVATE riscv_core unity)
+add_test(NAME test_finisher COMMAND test_finisher)
+
+add_executable(test_boot test_boot.c)
+target_link_libraries(test_boot PRIVATE riscv_core unity)
+add_test(NAME test_boot COMMAND test_boot)
+
 add_executable(test_uart test_uart.c)
 target_link_libraries(test_uart PRIVATE riscv_core unity)
 add_test(NAME test_uart COMMAND test_uart)
@@ -160,6 +168,7 @@ set_tests_properties(test_cpu_csr_oob PROPERTIES
 )
 
 include(riscv-tests.cmake)
+include(boot-tests.cmake)
 
 # Device registration aborts: overlapping RAM, overlapping another device, an empty device, and one
 # device too many. Each is a standalone executable that must die with the right message.
