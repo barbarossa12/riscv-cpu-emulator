@@ -114,7 +114,9 @@ if(RISCV_TESTS)
                      ${CMAKE_SOURCE_DIR}/tests/asm/uart_autoconfig_variants.S
                      ${CMAKE_SOURCE_DIR}/tests/asm/plic_mmio.S
                      ${CMAKE_SOURCE_DIR}/tests/asm/uart_plic_irq.S
-                     ${CMAKE_SOURCE_DIR}/tests/asm/plic_s_mode.S)
+                     ${CMAKE_SOURCE_DIR}/tests/asm/plic_s_mode.S
+                     ${CMAKE_SOURCE_DIR}/tests/asm/wfi_uart_timeout.S
+                     ${CMAKE_SOURCE_DIR}/tests/asm/wfi_uart_stdin.S)
     add_test(NAME riscv-tests.build-asm
              COMMAND "${CMAKE_SOURCE_DIR}/scripts/build-asm-tests.sh"
                      "${RISCV_TESTS_SRC_DIR}" "${RISCV_TESTS_BUILD_DIR}" ${_asm_sources})
@@ -214,6 +216,26 @@ if(RISCV_TESTS)
     set_tests_properties(riscv-tests.uart-plic-irq PROPERTIES
         FIXTURES_REQUIRED riscv-tests-elfs TIMEOUT 60 LABELS riscv-tests
         PASS_REGULAR_EXPRESSION "IRQ OK, transmit by interrupt.*PASS \\(")
+
+    # WFI with device events, through the real emulator: idle time passes for the UART's receive timeout (about 3500 ticks, not
+    # the 1000000 the timer is armed for), and host input reaches a guest sleeping in WFI at the first WFI (stdin from a file
+    # that holds one byte, so the test does not depend on a writer's speed). Without RISCV_EMU_UART_STDIN the byte never arrives
+    # and the guest waits for the instruction limit.
+    add_test(NAME riscv-tests.wfi-uart-timeout
+             COMMAND riscv_emu "${RISCV_TESTS_BUILD_DIR}/wfi_uart_timeout")
+    set_tests_properties(riscv-tests.wfi-uart-timeout PROPERTIES
+        FIXTURES_REQUIRED riscv-tests-elfs TIMEOUT 60 LABELS riscv-tests
+        PASS_REGULAR_EXPRESSION "PASS \\(")
+    add_test(NAME riscv-tests.wfi-uart-stdin
+             COMMAND sh -c "f=\$(mktemp) && printf x > \$f && RISCV_EMU_UART_STDIN=1 $<TARGET_FILE:riscv_emu> ${RISCV_TESTS_BUILD_DIR}/wfi_uart_stdin < \$f; rc=\$?; rm -f \$f; exit \$rc")
+    set_tests_properties(riscv-tests.wfi-uart-stdin PROPERTIES
+        FIXTURES_REQUIRED riscv-tests-elfs TIMEOUT 60 LABELS riscv-tests
+        PASS_REGULAR_EXPRESSION "PASS \\(")
+    add_test(NAME riscv-tests.wfi-uart-stdin-off-by-default
+             COMMAND sh -c "printf x | $<TARGET_FILE:riscv_emu> ${RISCV_TESTS_BUILD_DIR}/wfi_uart_stdin 20000")
+    set_tests_properties(riscv-tests.wfi-uart-stdin-off-by-default PROPERTIES
+        FIXTURES_REQUIRED riscv-tests-elfs TIMEOUT 60 LABELS riscv-tests
+        PASS_REGULAR_EXPRESSION "TIMEOUT after 20000 instructions")
 
     foreach(name ${_names})
         add_test(NAME riscv-tests.${name}
