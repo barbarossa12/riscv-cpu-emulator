@@ -101,11 +101,13 @@ static void assert_mem_untouched(const Memory *m) {
 
 /* A failed load must not write memory and must not touch *out. */
 static void assert_load_fails(const uint8_t *e, size_t len, Memory *m, ElfStatus expected) {
-    ElfImage img = { 0xDEADBEEF, 0x12345678, true };
+    ElfImage img = { 0xDEADBEEF, 0x12345678, true, 0x11112222, 0x33334444 };
     TEST_ASSERT_EQUAL_INT(expected, elf_load_bytes(e, len, m, &img));
     TEST_ASSERT_EQUAL_UINT32(0xDEADBEEF, img.entry);
     TEST_ASSERT_EQUAL_UINT32(0x12345678, img.tohost);
     TEST_ASSERT_TRUE(img.has_tohost);
+    TEST_ASSERT_EQUAL_UINT32(0x11112222, img.lo);
+    TEST_ASSERT_EQUAL_UINT32(0x33334444, img.hi);
     assert_mem_untouched(m);
 }
 
@@ -171,6 +173,61 @@ void test_elf_loads_two_segments(void) {
     TEST_ASSERT_EQUAL_UINT8(0x18, m.buffer[0x80]);
     TEST_ASSERT_EQUAL_UINT8(0xAA, m.buffer[8]);
     TEST_ASSERT_EQUAL_UINT8(0xAA, m.buffer[0x88]);
+    mem_free(&m);
+}
+
+void test_elf_reports_the_address_extent_of_its_segments(void) {
+    uint8_t e[ELF_BUF]; Memory m; ElfImage img;
+    make_elf(e, 2);
+    set_phdr(e, 0, 1, PAYLOAD, BASE + 0x80, 8, 16);       // the higher segment first: lo must still be the lowest
+    set_phdr(e, 1, 1, PAYLOAD + 8, BASE + 0x10, 8, 8);
+    fresh_mem(&m, BASE);
+
+    TEST_ASSERT_EQUAL_INT(ELF_OK, elf_load_bytes(e, ELF_LEN, &m, &img));
+
+    TEST_ASSERT_EQUAL_UINT32(BASE + 0x10, img.lo);
+    TEST_ASSERT_EQUAL_UINT32(BASE + 0x90, img.hi);        // the .bss (memsz) counts, not just the file bytes
+    mem_free(&m);
+}
+
+void test_elf_without_loadable_segments_has_an_empty_extent(void) {
+    uint8_t e[ELF_BUF]; Memory m; ElfImage img = { 0, 0, false, 7, 9 };
+    make_elf(e, 1);
+    set_phdr(e, 0, 4, PAYLOAD, BASE, 8, 8);               // PT_NOTE: nothing to load
+    fresh_mem(&m, BASE);
+
+    TEST_ASSERT_EQUAL_INT(ELF_OK, elf_load_bytes(e, ELF_LEN, &m, &img));
+
+    TEST_ASSERT_EQUAL_UINT32(img.lo, img.hi);
+    mem_free(&m);
+}
+
+void test_elf_inspect_reads_everything_and_writes_nothing(void) {
+    uint8_t e[ELF_BUF]; Memory m; ElfImage img;
+    make_elf(e, 1);
+    set_phdr(e, 0, 1, PAYLOAD, BASE + 0x20, 8, 8);
+    fresh_mem(&m, BASE);
+
+    TEST_ASSERT_EQUAL_INT(ELF_OK, elf_inspect(e, ELF_LEN, &m, &img));
+
+    TEST_ASSERT_EQUAL_UINT32(BASE, img.entry);
+    TEST_ASSERT_EQUAL_UINT32(0x80001000, img.tohost);
+    TEST_ASSERT_TRUE(img.has_tohost);
+    TEST_ASSERT_EQUAL_UINT32(BASE + 0x20, img.lo);
+    TEST_ASSERT_EQUAL_UINT32(BASE + 0x28, img.hi);
+    assert_mem_untouched(&m);
+    mem_free(&m);
+}
+
+void test_elf_inspect_rejects_what_load_rejects(void) {
+    uint8_t e[ELF_BUF]; Memory m; ElfImage img = { 0, 0, false, 0, 0 };
+    make_elf(e, 1);
+    set_phdr(e, 0, 1, PAYLOAD, BASE + MEM_SIZE, 8, 8);    // outside memory
+    fresh_mem(&m, BASE);
+
+    TEST_ASSERT_EQUAL_INT(ELF_ERR_RANGE, elf_inspect(e, ELF_LEN, &m, &img));
+    TEST_ASSERT_EQUAL_INT(ELF_ERR_FORMAT, elf_inspect(e, 10, &m, &img));
+    assert_mem_untouched(&m);
     mem_free(&m);
 }
 
@@ -436,6 +493,10 @@ int main(void) {
     RUN_TEST(test_elf_zero_fills_bss);
     RUN_TEST(test_elf_skips_non_load_segments);
     RUN_TEST(test_elf_loads_two_segments);
+    RUN_TEST(test_elf_reports_the_address_extent_of_its_segments);
+    RUN_TEST(test_elf_without_loadable_segments_has_an_empty_extent);
+    RUN_TEST(test_elf_inspect_reads_everything_and_writes_nothing);
+    RUN_TEST(test_elf_inspect_rejects_what_load_rejects);
     RUN_TEST(test_elf_finds_tohost_symbol);
     RUN_TEST(test_elf_without_symbol_table_has_no_tohost);
     RUN_TEST(test_elf_symbol_table_without_tohost);

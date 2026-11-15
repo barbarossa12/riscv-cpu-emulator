@@ -83,7 +83,7 @@ static ElfStatus find_tohost(const uint8_t *data, size_t len, ElfImage *img) {
 	return ELF_OK;
 }
 
-ElfStatus elf_load_bytes(const uint8_t *data, size_t len, Memory *mem, ElfImage *out) {
+ElfStatus elf_inspect(const uint8_t *data, size_t len, const Memory *mem, ElfImage *out) {
 	if (len < EHDR_SIZE) {
 		return ELF_ERR_FORMAT;
 	}
@@ -105,6 +105,8 @@ ElfStatus elf_load_bytes(const uint8_t *data, size_t len, Memory *mem, ElfImage 
 		return ELF_ERR_FORMAT;
 	}
 
+	bool have_extent = false;
+
 	/* Pass 1: validate every segment before writing anything. */
 	for (uint16_t i = 0; i < phnum; i++) {
 		const uint8_t *ph = data + phoff + (size_t)i * PHDR_SIZE;
@@ -121,12 +123,30 @@ ElfStatus elf_load_bytes(const uint8_t *data, size_t len, Memory *mem, ElfImage 
 		if (memsz > 0 && !mem_region_ok(mem, vaddr, memsz)) {
 			return ELF_ERR_RANGE;
 		}
+		if (memsz > 0) {
+			if (!have_extent || vaddr < img.lo) img.lo = vaddr;
+			if (!have_extent || vaddr + memsz > img.hi) img.hi = vaddr + memsz;
+			have_extent = true;
+		}
 	}
 
 	ElfStatus status = find_tohost(data, len, &img);
 	if (status != ELF_OK) {
 		return status;
 	}
+
+	*out = img;
+	return ELF_OK;
+}
+
+ElfStatus elf_load_bytes(const uint8_t *data, size_t len, Memory *mem, ElfImage *out) {
+	ElfImage img;
+	ElfStatus status = elf_inspect(data, len, mem, &img);
+	if (status != ELF_OK) {
+		return status;
+	}
+	uint32_t phoff = rd32(data + 28);
+	uint16_t phnum = rd16(data + 44);
 
 	/* Pass 2: copy the file bytes and zero the rest (.bss). */
 	for (uint16_t i = 0; i < phnum; i++) {
