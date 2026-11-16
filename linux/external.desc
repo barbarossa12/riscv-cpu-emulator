@@ -1,0 +1,2 @@
+name: RISCV_EMU
+desc: Linux for the riscv-emu machine (RV32IMAC, initramfs)

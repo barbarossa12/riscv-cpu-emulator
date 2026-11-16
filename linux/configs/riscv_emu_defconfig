@@ -1,0 +1,37 @@
+# Buildroot defconfig for the riscv-emu machine: RV32IMAC, no floating point, glibc, busybox,
+# and the root filesystem linked into the kernel as an initramfs.
+# Use it through scripts/build-linux.sh (it sets BR2_EXTERNAL and the kernel source directory).
+
+# The CPU: RV32 with I, M, A and C only. The stock "G" variant would add F and D, which this CPU lacks.
+BR2_riscv=y
+BR2_RISCV_32=y
+BR2_riscv_custom=y
+BR2_RISCV_ISA_RVM=y
+BR2_RISCV_ISA_RVA=y
+BR2_RISCV_ISA_RVC=y
+BR2_RISCV_ABI_ILP32=y
+
+# Toolchain: built by buildroot (glibc is the default). The headers come from the kernel being built;
+# the series below only tells buildroot which headers it will get (the kernel here is newer than it knows).
+BR2_PACKAGE_HOST_LINUX_HEADERS_CUSTOM_6_12=y
+
+# System: log in as root on the UART, no network.
+BR2_TARGET_GENERIC_HOSTNAME="riscv-emu"
+BR2_TARGET_GENERIC_ISSUE="Welcome to Linux on riscv-emu"
+BR2_TARGET_GENERIC_GETTY_PORT="ttyS0"
+BR2_ROOTFS_OVERLAY="$(BR2_EXTERNAL_RISCV_EMU_PATH)/board/riscv_emu/overlay"
+BR2_ROOTFS_POST_BUILD_SCRIPT="$(BR2_EXTERNAL_RISCV_EMU_PATH)/board/riscv_emu/post-build.sh"
+
+# Kernel: the source comes from LINUX_OVERRIDE_SRCDIR (set by the build script); the version is only a label.
+BR2_LINUX_KERNEL=y
+BR2_LINUX_KERNEL_CUSTOM_VERSION=y
+BR2_LINUX_KERNEL_CUSTOM_VERSION_VALUE="7.4-rc2"
+# The architecture default is "make ARCH=riscv defconfig"; the fragment below turns it into a 32-bit build.
+BR2_LINUX_KERNEL_USE_ARCH_DEFAULT_CONFIG=y
+BR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES="$(BR2_EXTERNAL_RISCV_EMU_PATH)/board/riscv_emu/kernel.fragment"
+
+# Root filesystem: a cpio archive that buildroot links into the kernel (images/Image then holds everything).
+# BR2_TARGET_ROOTFS_TAR is off because nothing needs it.
+# BR2_TARGET_ROOTFS_TAR is not set
+BR2_TARGET_ROOTFS_CPIO=y
+BR2_TARGET_ROOTFS_INITRAMFS=y
