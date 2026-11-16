@@ -12,6 +12,10 @@
 
 	chosen {
 		stdout-path = "/soc/serial@10000000";
+		// console=ttyS0: the 16550 is the console. earlycon=sbi: print through OpenSBI from the very first kernel message,
+		// before the UART driver is up. The root filesystem is an initramfs linked into the kernel, whose /init is found by
+		// default, so there is no root= or rdinit=.
+		bootargs = "console=ttyS0 earlycon=sbi";
 	};
 
 	memory@80000000 {

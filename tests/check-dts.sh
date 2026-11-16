@@ -80,6 +80,10 @@ check "reboot regmap" "$(get u /reboot regmap)" "$test_phandle"
 check "reboot offset" "$(get u /reboot offset)" "0"
 check "reboot value" "$(get x /reboot value)" "$(hex "$(define finisher.h FINISHER_RESET)")"
 
+# The kernel command line (the Linux image needs the console named; see linux/ for how the image is built)
+check "chosen bootargs" "$(get s /chosen bootargs)" "console=ttyS0 earlycon=sbi"
+check "chosen stdout-path" "$(get s /chosen stdout-path)" "/soc/serial@10000000"
+
 check "serial compatible" "$(get s /soc/serial@10000000 compatible)" "ns16550a"
 check "plic compatible" "$(get s /soc/plic@c000000 compatible)" "sifive,plic-1.0.0 riscv,plic0"
 check "clint compatible" "$(get s /soc/clint@2000000 compatible)" "sifive,clint0 riscv,clint0"
