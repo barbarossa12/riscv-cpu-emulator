@@ -19,7 +19,6 @@ BR2_PACKAGE_HOST_LINUX_HEADERS_CUSTOM_6_12=y
 BR2_TARGET_GENERIC_HOSTNAME="riscv-emu"
 BR2_TARGET_GENERIC_ISSUE="Welcome to Linux on riscv-emu"
 BR2_TARGET_GENERIC_GETTY_PORT="ttyS0"
-BR2_ROOTFS_OVERLAY="$(BR2_EXTERNAL_RISCV_EMU_PATH)/board/riscv_emu/overlay"
 BR2_ROOTFS_POST_BUILD_SCRIPT="$(BR2_EXTERNAL_RISCV_EMU_PATH)/board/riscv_emu/post-build.sh"
 
 # Kernel: the source comes from LINUX_OVERRIDE_SRCDIR (set by the build script); the version is only a label.
