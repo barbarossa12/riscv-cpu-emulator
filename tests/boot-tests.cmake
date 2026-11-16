@@ -61,4 +61,37 @@ if(RISCV_GCC)
     boot_test(usage-program-and-flag "usage:.*\\[exit=3\\]" ${S}/boot_ok.elf --bios-elf ${S}/boot_ok.elf)
     boot_test(usage-limit-zero    "usage:.*\\[exit=3\\]" --bios-elf ${S}/boot_ok.elf --max-instructions 0)
     boot_test(usage-limit-text    "usage:.*\\[exit=3\\]" --bios-elf ${S}/boot_ok.elf --max-instructions abc)
+
+    # OpenSBI itself, as the firmware. It is built out of tree from the opensbi/ checkout with a Linux-flavoured RISC-V gcc (the
+    # bare-metal one cannot link position-independent executables, which OpenSBI's Makefile requires); only fw_jump is needed. The
+    # flat image is loaded at the RAM base, OpenSBI relocates itself, prints its banner on our UART and hands over to the next stage
+    # at 0x80400000 in S-mode. The next stage is a stub that checks what it was promised and then asks OpenSBI to shut down or reboot.
+    find_program(RISCV_LINUX_GCC riscv64-linux-gnu-gcc)
+    find_program(MAKE_PROGRAM make)
+    if(RISCV_LINUX_GCC AND MAKE_PROGRAM AND EXISTS "${CMAKE_SOURCE_DIR}/opensbi/Makefile" AND TARGET riscv_emu_dtb)
+        set(OPENSBI_BUILD_DIR "${CMAKE_BINARY_DIR}/opensbi")
+        set(OPENSBI_FW "${OPENSBI_BUILD_DIR}/platform/generic/firmware/fw_jump.bin")
+        add_test(NAME opensbi.build
+                 COMMAND ${MAKE_PROGRAM} -C "${CMAKE_SOURCE_DIR}/opensbi" O=${OPENSBI_BUILD_DIR} -j4
+                         PLATFORM=generic PLATFORM_RISCV_XLEN=32 PLATFORM_RISCV_ISA=rv32imac_zicsr_zifencei
+                         PLATFORM_RISCV_ABI=ilp32 CROSS_COMPILE=riscv64-linux-gnu- FW_JUMP=y FW_DYNAMIC=n FW_PAYLOAD=n)
+        set_tests_properties(opensbi.build PROPERTIES FIXTURES_SETUP opensbi-fw TIMEOUT 600)
+
+        function(opensbi_test name regex kernel)
+            add_test(NAME opensbi.${name}
+                     COMMAND sh -c "$<TARGET_FILE:riscv_emu> --bios-bin ${OPENSBI_FW} --kernel-elf ${S}/${kernel} --dtb ${RISCV_EMU_DTB} --max-instructions 50000000 2>&1; echo \"[exit=$?]\"")
+            set_tests_properties(opensbi.${name} PROPERTIES
+                FIXTURES_REQUIRED "boot-stubs;opensbi-fw" TIMEOUT 120 PASS_REGULAR_EXPRESSION "${regex}")
+        endfunction()
+
+        # the stub checks the handoff (its own exit code for each item) and OpenSBI's shutdown ends the run with status 0
+        opensbi_test(handoff "\\[exit=0\\]" boot_sbi_handoff_kernel.elf)
+        # the banner describes our machine: the parts that come from our device tree and our CPU, in OpenSBI's order
+        opensbi_test(banner
+            "Platform Name *: riscv-emu.*Platform HART Count *: 1.*Platform HART Protection *: pmp.*Platform IPI Device *: aclint-mswi.*Platform Timer Device *: aclint-mtimer @ 10000000Hz.*Platform Console Device *: uart8250.*Platform Reboot Device *: syscon-reboot.*Platform Shutdown Device *: syscon-poweroff.*Firmware Base *: 0x80000000.*Domain0 Next Address *: 0x80400000.*Domain0 Next Mode *: S-mode.*Boot HART ID *: 0.*Boot HART Base ISA *: rv32imac.*Boot HART PMP Count *: 16.*\\[exit=0\\]"
+            boot_sbi_handoff_kernel.elf)
+        opensbi_test(reboot "asked for a reboot.*\\[exit=4\\]" boot_sbi_reboot_kernel.elf)
+    else()
+        message(STATUS "OpenSBI boot tests not registered (need the opensbi/ checkout, riscv64-linux-gnu-gcc, make and dtc)")
+    endif()
 endif()
