@@ -91,6 +91,31 @@ if(RISCV_GCC)
             "Platform Name *: riscv-emu.*Platform HART Count *: 1.*Platform HART Protection *: pmp.*Platform IPI Device *: aclint-mswi.*Platform Timer Device *: aclint-mtimer @ 10000000Hz.*Platform Console Device *: uart8250.*Platform Reboot Device *: syscon-reboot.*Platform Shutdown Device *: syscon-poweroff.*Firmware Base *: 0x80000000.*Domain0 Next Address *: 0x80400000.*Domain0 Next Mode *: S-mode.*Boot HART ID *: 0.*Boot HART Base ISA *: rv32imac.*Boot HART PMP Count *: 16.*\\[exit=0\\]"
             boot_sbi_handoff_kernel.elf)
         opensbi_test(reboot "asked for a reboot.*\\[exit=4\\]" boot_sbi_reboot_kernel.elf)
+
+        # S-mode services through OpenSBI (SBI calls, the timer, IPIs, counters): each stub prints a line and shuts down
+        opensbi_test(services-base    "sbi base ok.*\\[exit=0\\]"    boot_sbi_base_kernel.elf)
+        opensbi_test(services-console "AB.*buffer.*Z.*sbi console ok.*\\[exit=0\\]" boot_sbi_console_kernel.elf)
+        opensbi_test(services-timer   "sbi timer ok.*\\[exit=0\\]"   boot_sbi_timer_kernel.elf)
+        opensbi_test(services-ipi     "sbi ipi ok.*\\[exit=0\\]"     boot_sbi_ipi_kernel.elf)
+        opensbi_test(services-state    "sbi state ok.*\\[exit=0\\]"  boot_sbi_state_kernel.elf)
+
+        # The same stubs on QEMU's virt machine with the same OpenSBI, as an oracle: what the stubs expect of the SBI is what a real
+        # implementation does. Optional (needs qemu-system-riscv32).
+        find_program(QEMU_RV32 qemu-system-riscv32)
+        if(QEMU_RV32)
+            function(qemu_test name regex kernel)
+                add_test(NAME qemu.${name}
+                         COMMAND sh -c "timeout 60 ${QEMU_RV32} -M virt -m 128M -smp 1 -nographic -monitor none -serial stdio -bios ${OPENSBI_FW} -kernel ${S}/${kernel} 2>&1; echo \"[exit=$?]\"")
+                set_tests_properties(qemu.${name} PROPERTIES
+                    FIXTURES_REQUIRED "boot-stubs;opensbi-fw" TIMEOUT 90 PASS_REGULAR_EXPRESSION "${regex}")
+            endfunction()
+            qemu_test(handoff        "\\[exit=0\\]"                         boot_sbi_handoff_kernel.elf)
+            qemu_test(services-base    "sbi base ok.*\\[exit=0\\]"    boot_sbi_base_kernel.elf)
+            qemu_test(services-console "AB.*buffer.*Z.*sbi console ok.*\\[exit=0\\]" boot_sbi_console_kernel.elf)
+            qemu_test(services-timer   "sbi timer ok.*\\[exit=0\\]"   boot_sbi_timer_kernel.elf)
+            qemu_test(services-ipi     "sbi ipi ok.*\\[exit=0\\]"     boot_sbi_ipi_kernel.elf)
+            qemu_test(services-state   "sbi state ok.*\\[exit=0\\]"   boot_sbi_state_kernel.elf)
+        endif()
     else()
         message(STATUS "OpenSBI boot tests not registered (need the opensbi/ checkout, riscv64-linux-gnu-gcc, make and dtc)")
     endif()
