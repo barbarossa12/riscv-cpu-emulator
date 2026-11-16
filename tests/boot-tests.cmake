@@ -105,7 +105,7 @@ if(RISCV_GCC)
         if(QEMU_RV32)
             function(qemu_test name regex kernel)
                 add_test(NAME qemu.${name}
-                         COMMAND sh -c "timeout 60 ${QEMU_RV32} -M virt -m 128M -smp 1 -nographic -monitor none -serial stdio -bios ${OPENSBI_FW} -kernel ${S}/${kernel} 2>&1; echo \"[exit=$?]\"")
+                         COMMAND sh -c "timeout 60 ${QEMU_RV32} -M virt -m 128M -smp 1 -nographic -monitor none -serial stdio -bios ${OPENSBI_FW} -kernel ${S}/${kernel} </dev/null 2>&1; echo \"[exit=$?]\"")
                 set_tests_properties(qemu.${name} PROPERTIES
                     FIXTURES_REQUIRED "boot-stubs;opensbi-fw" TIMEOUT 90 PASS_REGULAR_EXPRESSION "${regex}")
             endfunction()
